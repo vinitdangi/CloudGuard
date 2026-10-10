@@ -18,10 +18,19 @@ class CloudGuardSession:
         return self._session.client(service_name, **kwargs)
 
 
-def create_session(region=None, endpoint_url=None):
+def create_session(
+    region=None,
+    endpoint_url=None,
+    aws_access_key_id=None,
+    aws_secret_access_key=None,
+):
     endpoint_url = endpoint_url or os.getenv("AWS_ENDPOINT_URL")
 
-    session = boto3.Session(region_name=region)
+    session = boto3.Session(
+        region_name=region,
+        aws_access_key_id=aws_access_key_id,
+        aws_secret_access_key=aws_secret_access_key,
+    )
 
     return CloudGuardSession(
         session=session,

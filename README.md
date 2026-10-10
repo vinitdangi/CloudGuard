@@ -52,6 +52,37 @@ The goal is not simply to list AWS resources. CloudGuard evaluates their securit
 | `tests/`             | Automated security-check tests |
 | `Infrastructure/`    | Terraform security lab         |
 
+## Dashboard Authentication
+
+The Streamlit dashboard requires a CloudGuard account before showing scan
+controls. Create an account from the **Sign Up** form, then log in. Account
+records are stored in `data/cloudguard_users.sqlite3`; passwords are hashed
+with Argon2id. The local database is ignored by Git. Set
+`CLOUDGUARD_AUTH_DB` to use a different SQLite file location.
+
+Start the dashboard with the existing command:
+
+```bash
+PYTHONPATH=. streamlit run dashboard/app.py
+```
+
+Authentication is local to the current Streamlit session. AWS scanning
+continues to use the existing boto3 credential chain and does not store AWS
+credentials in the account database.
+
+After login, use **AWS Cloud Configuration** to select a region and either
+enter temporary access-key credentials or use the existing AWS CLI, environment,
+or IAM role credential chain. CloudGuard verifies the connection with STS before
+enabling a scan. Entered keys remain in the current server-side Streamlit session
+and are cleared on logout; the default region is `ap-southeast-2`.
+
+After a successful scan, select **Download PDF Report** to download a formatted
+assessment containing the executive summary, findings, evidence, and scanner
+recommendations. ReportLab generates the PDF in memory; AWS credentials and
+CloudGuard authentication data are excluded. Install the PDF dependencies with
+`pip install -r requirements.txt` (`reportlab` generates the report and `pypdf`
+supports PDF text verification in tests).
+
 ---
 
 ## Plugin Architecture

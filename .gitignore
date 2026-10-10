@@ -1,0 +1,40 @@
+# Virtual Environment
+.venv/
+venv/
+
+# Environment Variables
+.env
+data/cloudguard_users.sqlite3
+data/cloudguard_users.sqlite3-*
+
+# Python Cache
+__pycache__/
+*.py[cod]
+
+# VS Code
+.vscode/
+
+# Logs
+logs/
+*.log
+
+# Personal Notes
+.notes/
+.prog_test
+.pytest_cache/
+.coverage
+.pytest_cache
+.mypy_cache/
+
+cloudguard_report.json
+cloudguard_report.json
+run_mock_aws.py
+report.html
+cloudguard_report.json
+
+docker-compose.yml
+aws_wrapper.py
+.terraform/
+terraform.tfstate
+terraform.tfstate.backup
+Infrastructure/terraform/.terraform.lock.hcl
