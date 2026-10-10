@@ -6,6 +6,7 @@ import pytest
 
 from database.db import database_path, initialize_database
 from database.scan_history import get_scan_history, save_scan_history
+from cloudguard.security_score import calculate_security_score
 
 
 def _initialize(tmp_path, monkeypatch):
@@ -101,3 +102,30 @@ def test_credentials_are_not_accepted_or_stored(tmp_path, monkeypatch):
         columns = {row[1] for row in connection.execute("PRAGMA table_info(scan_history)")}
     assert "aws_access_key_id" not in columns
     assert "aws_secret_access_key" not in columns
+
+
+def test_scan_history_stores_authoritative_calculated_score(tmp_path, monkeypatch):
+    _initialize(tmp_path, monkeypatch)
+    score = calculate_security_score([
+        {"finding_id": "mfa", "check": "MFA", "resource": "user-a",
+         "passed": False, "severity": "HIGH"},
+        {"finding_id": "encryption", "check": "Encryption", "resource": "bucket-a",
+         "passed": True},
+    ])
+
+    _save(
+        "2026-10-10T10:00:00+00:00",
+        security_score=score.score,
+        total_findings=score.total_findings,
+        critical_count=score.critical_count,
+        high_count=score.high_count,
+        medium_count=score.medium_count,
+        low_count=score.low_count,
+        passed_count=score.passed_count,
+    )
+
+    row = get_scan_history("security-user")[0]
+    assert row["security_score"] == score.score
+    assert row["total_findings"] == score.total_findings
+    assert row["high_count"] == score.high_count
+    assert row["passed_count"] == score.passed_count

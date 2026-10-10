@@ -6,6 +6,7 @@ from pypdf import PdfReader
 
 from cloudguard.findings import Finding
 from cloudguard.reporting.pdf_exporter import generate_pdf_report
+from cloudguard.security_score import calculate_security_score
 
 FAKE_SECRET = "FAKE_TEST_" + "SECRET_DO_NOT_USE"
 
@@ -84,6 +85,22 @@ def test_pdf_generation_counts_all_severities_and_compacts_passed_checks():
     assert "Passed Checks" in text
     assert "S3 encryption" in text
     assert "No action required" not in text
+
+
+def test_pdf_displays_the_precalculated_score_rating_and_penalty_breakdown():
+    findings = [
+        Finding(check="MFA", resource="user-a", passed=False, severity="HIGH"),
+        Finding(check="S3 encryption", resource="bucket-a", passed=True),
+    ]
+    score = calculate_security_score(findings)
+    text = extract_text(generate_pdf_report(findings, security_score=score))
+
+    assert "SECURITY SCORE" in text
+    assert f"{score.score:g} / 100" in text
+    assert score.rating in text
+    assert "Penalty Breakdown" in text
+    assert "High: 1 x 10 = 10 points" in text
+    assert "Weighted penalty: 10 / 40" in text
 
 
 def test_pdf_redacts_credentials_from_findings_metadata_and_evidence():

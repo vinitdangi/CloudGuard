@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import datetime, timezone
 
@@ -18,10 +19,11 @@ from cloudguard.aws.configuration import (
     test_aws_connection,
 )
 from cloudguard.reporting.pdf_exporter import generate_pdf_report
+from cloudguard.reporting.json_exporter import build_json_payload
+from cloudguard.security_score import calculate_security_score, deduplicate_findings
 from database.db import initialize_database
 from database.scan_history import get_scan_history, save_scan_history
 from engine.scan_engine import ScanEngine
-from cloudguard.posture import SecurityPosture
 
 logger = logging.getLogger(__name__)
 
@@ -246,6 +248,9 @@ if st.sidebar.button(
 
     st.success("Scan Completed!")
 
+    findings = deduplicate_findings(findings)
+    security_score = calculate_security_score(findings)
+
     # Convert Findings
 
     all_findings = []
@@ -259,34 +264,78 @@ if st.sidebar.button(
             all_findings.append(finding)
 
     severity_order = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "PASS"]
-    severity_values = []
-    for finding in all_findings:
-        if finding.get("passed"):
-            severity_values.append("PASS")
-            continue
-        severity = str(finding.get("severity", "HIGH")).upper()
-        severity_values.append(severity if severity in severity_order else "HIGH")
-    severity_counts = pd.Series(severity_values).value_counts().reindex(
-        severity_order, fill_value=0
-    )
-    posture = SecurityPosture.calculate(findings)
+    severity_counts = pd.Series({
+        "CRITICAL": security_score.critical_count,
+        "HIGH": security_score.high_count,
+        "MEDIUM": security_score.medium_count,
+        "LOW": security_score.low_count,
+        "PASS": security_score.passed_count,
+    }).reindex(severity_order, fill_value=0)
     try:
         save_scan_history(
             username=st.session_state["username"],
             scan_timestamp=scan_timestamp,
             aws_account_id=st.session_state["aws_account_id"],
             aws_region=st.session_state["aws_region"],
-            security_score=posture["score"],
-            total_findings=len(all_findings),
-            critical_count=int(severity_counts["CRITICAL"]),
-            high_count=int(severity_counts["HIGH"]),
-            medium_count=int(severity_counts["MEDIUM"]),
-            low_count=int(severity_counts["LOW"]),
-            passed_count=int(severity_counts["PASS"]),
+            security_score=security_score.score,
+            total_findings=security_score.total_findings,
+            critical_count=security_score.critical_count,
+            high_count=security_score.high_count,
+            medium_count=security_score.medium_count,
+            low_count=security_score.low_count,
+            passed_count=security_score.passed_count,
         )
     except Exception as exc:
         logger.error("Scan history save failed (%s)", type(exc).__name__)
         st.warning("The scan completed, but its history entry could not be saved.")
+
+    # Security Score and severity breakdown
+
+    st.subheader("Security Score")
+    score_columns = st.columns([1, 2])
+    score_columns[0].metric("SECURITY SCORE", f"{security_score.score:g} / 100")
+    score_columns[0].markdown(f"**{security_score.rating}**")
+    breakdown_columns = score_columns[1].columns(5)
+    for column, severity, count in zip(
+        breakdown_columns,
+        ("Critical", "High", "Medium", "Low", "Passed"),
+        (
+            security_score.critical_count,
+            security_score.high_count,
+            security_score.medium_count,
+            security_score.low_count,
+            security_score.passed_count,
+        ),
+    ):
+        column.metric(severity, count)
+
+    if security_score.total_findings == 0:
+        st.info("No checks were returned. The score has zero assessment coverage.")
+    else:
+        most_severe = next(
+            (severity for severity in ("critical", "high", "medium", "low")
+             if security_score.severity_summary[severity]),
+            None,
+        )
+        if most_severe:
+            finding_count = security_score.severity_summary[most_severe]
+            penalty = security_score.penalty_breakdown[most_severe.upper()]
+            st.caption(
+                f"{finding_count} {most_severe.title()} finding(s) contribute "
+                f"{penalty} weighted penalty points to the score."
+            )
+        with st.expander("Understand the score"):
+            for severity in ("CRITICAL", "HIGH", "MEDIUM", "LOW"):
+                st.write(
+                    f"{severity.title()}: {security_score.severity_summary[severity.lower()]} "
+                    f"× {security_score.severity_weights[severity]} "
+                    f"= {security_score.penalty_breakdown[severity]} penalty points"
+                )
+            st.write(
+                f"Weighted penalty: {security_score.total_penalty} / "
+                f"{security_score.maximum_penalty}. Final score: "
+                f"{security_score.score:g} / 100."
+            )
 
     # Metrics
 
@@ -305,10 +354,7 @@ if st.sidebar.button(
         resources_with_findings,
     )
 
-    col2.metric(
-        "Total Findings",
-        len(all_findings),
-    )
+    col2.metric("Total Findings", security_score.total_findings)
 
     col3.metric(
         "Scan Execution Time",
@@ -358,27 +404,11 @@ if st.sidebar.button(
                 use_container_width=True,
                 hide_index=True,
             )
-        # Severity Summary
-
-        st.subheader("🔎 Severity Summary")
-
-        summary_cols = st.columns(len(severity_order))
-
-        for column, severity in zip(
-            summary_cols,
-            severity_order,
-        ):
-
-            column.metric(
-                severity,
-                int(severity_counts[severity]),
-            )
-
         # JSON Export
         st.subheader("Export Assessment Data")
 
-        json_report = df.to_json(
-            orient="records",
+        json_report = json.dumps(
+            build_json_payload(findings, ["All"], security_score),
             indent=4,
         )
 
@@ -411,6 +441,7 @@ if st.sidebar.button(
                 "scan_status": "Completed",
                 "cloudguard_version": "v1.0.0",
             },
+            security_score=security_score,
             sensitive_values=(
                 st.session_state.get("aws_access_key_id", ""),
                 st.session_state.get("aws_secret_access_key", ""),

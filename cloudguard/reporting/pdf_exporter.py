@@ -209,6 +209,7 @@ def generate_pdf_report(
     findings: Iterable[Any],
     metadata: Mapping[str, Any] | None = None,
     *,
+    security_score: Any = None,
     sensitive_values: Iterable[str] = (),
 ) -> bytes:
     """Return a professional PDF report as bytes without writing report files.
@@ -220,7 +221,25 @@ def generate_pdf_report(
     secrets = tuple(str(value) for value in sensitive_values if value)
     metadata = _sanitize(metadata or {}, secrets)
     items = [_finding_data(finding, secrets) for finding in findings]
-    counts = Counter(_severity(item) for item in items)
+    score_data = None
+    if security_score is not None:
+        if hasattr(security_score, "to_dict"):
+            score_data = security_score.to_dict()
+        elif isinstance(security_score, Mapping):
+            score_data = dict(security_score)
+        else:
+            raise TypeError("security_score must be a SecurityScore or mapping")
+    if score_data:
+        summary = score_data["severity_summary"]
+        counts = Counter({
+            "CRITICAL": summary["critical"],
+            "HIGH": summary["high"],
+            "MEDIUM": summary["medium"],
+            "LOW": summary["low"],
+            "PASS": summary["passed"],
+        })
+    else:
+        counts = Counter(_severity(item) for item in items)
     failed_findings = [item for item in items if not item.get("passed")]
     passed_findings = [item for item in items if item.get("passed")]
 
@@ -337,6 +356,53 @@ def generate_pdf_report(
         ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
     ]))
     story.extend([metrics, Spacer(1, 8)])
+
+    if score_data:
+        score_label = Paragraph(
+            f'<font color="{NAVY.hexval()}"><b>SECURITY SCORE</b></font>',
+            styles["label"],
+        )
+        score_value = Paragraph(
+            f'<font color="{NAVY.hexval()}"><b>{score_data["score"]:g} / 100</b></font>',
+            styles["cover_subtitle"],
+        )
+        score_rating = _paragraph(score_data["rating"], styles["body"])
+        penalty_lines = [
+            f'{severity.title()}: {count} x {score_data["severity_weights"][severity]} = '
+            f'{score_data["penalty_breakdown"][severity]} points'
+            for severity, count in (
+                ("CRITICAL", score_data["critical_count"]),
+                ("HIGH", score_data["high_count"]),
+                ("MEDIUM", score_data["medium_count"]),
+                ("LOW", score_data["low_count"]),
+            )
+        ]
+        formula = (
+            f'Weighted penalty: {score_data["total_penalty"]} / '
+            f'{score_data["maximum_penalty"]}; final score: {score_data["score"]:g} / 100'
+        )
+        score_table = Table(
+            [[score_label, score_value], [_paragraph("Rating", styles["label"]), score_rating]],
+            colWidths=[1.55 * inch, 5.15 * inch],
+            hAlign="LEFT",
+        )
+        score_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), PALE),
+            ("BOX", (0, 0), (-1, -1), 0.7, GRID),
+            ("INNERGRID", (0, 0), (-1, -1), 0.35, GRID),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        story.extend([
+            score_table,
+            _paragraph("Penalty Breakdown", styles["subsection"]),
+            _paragraph(" | ".join(penalty_lines), styles["small"]),
+            _paragraph(formula, styles["small"]),
+            Spacer(1, 8),
+        ])
 
     executive_rows = [
         ("Scan status", _metadata_value(metadata, "scan_status", default="Completed")),

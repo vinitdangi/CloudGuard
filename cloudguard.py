@@ -5,6 +5,7 @@ from cloudguard.aws.session import create_session
 from cloudguard.reporting.html_exporter import export_to_html
 from cloudguard.reporting.json_exporter import export_to_json
 from cloudguard.reporting.summary import print_summary
+from cloudguard.security_score import calculate_security_score, deduplicate_findings
 from cloudguard.utils.logger import write_log
 from engine.scan_engine import ScanEngine
 from plugin_manager import PluginRegistry, load_all_plugins
@@ -64,19 +65,21 @@ def handle_scan(args):
     # Run Scan Engine
     engine = ScanEngine(session=session, plugins_to_run=plugins_to_run)
     all_findings, metadata = engine.run()
+    all_findings = deduplicate_findings(all_findings)
 
     end_time = datetime.now()
 
     # 2. Trigger Reporting Engine if --report flag is passed
     if args.report:
         bucket_count = metadata.get("bucket_count", 0)
+        security_score = calculate_security_score(all_findings)
 
         # Terminal Summary Table
-        print_summary(all_findings, bucket_count, start_time, end_time)
+        print_summary(all_findings, bucket_count, start_time, end_time, security_score)
 
         # HTML & JSON Exporters
         export_to_html(all_findings, running_tasks)
-        export_to_json(all_findings, running_tasks)
+        export_to_json(all_findings, running_tasks, security_score)
 
 
 def main():

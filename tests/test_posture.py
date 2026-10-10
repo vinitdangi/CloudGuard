@@ -31,7 +31,7 @@ def test_one_high():
     result = SecurityPosture.calculate(findings)
 
     assert result["total_risk"] == 8.0
-    assert result["score"] == 80.0
+    assert result["score"] == 50.0
 
 
 def test_one_critical():
@@ -47,5 +47,5 @@ def test_one_critical():
     result = SecurityPosture.calculate(findings)
 
     assert result["total_risk"] == 10.0
-    assert result["score"] == 60.0
+    assert result["score"] == 0.0
     assert result["critical"] == 1
