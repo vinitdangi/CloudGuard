@@ -795,21 +795,37 @@ Instead of treating a security scanner as a black box, the project implements th
 
 The project is designed around real AWS APIs and real cloud infrastructure.
 
----
+## Project Developer
 
-## Author
+**Vinit Dangi**  
+BCA — Cloud Security  
+AWS Cloud Security & Cloud Security Engineering
 
-**Mohsan Razaq**
+This repository represents my academic project and development work:
 
-BS Cyber Security
+**CloudGuard — AWS Cloud Security Misconfiguration Detection & Risk Assessment Platform**
 
-Cloud Security and Offensive Security
+The project documents my academic development work, including modifications,
+testing, security improvements, documentation, and project-specific enhancements.
 
----
+## Attribution
+
+This project is based on and extends the original **CloudGuard** project by
+**Mohsan Razaq**.
+
+Original repository:
+https://github.com/MohsanRazaq/CloudGuard
+
+The original project's architecture and implementation were used as a starting
+point for this academic project. Original authorship is acknowledged here, while
+my additions and modifications are part of my own academic development work.
 
 ## License
 
-See the repository for the applicable license.
+The original CloudGuard repository does not currently provide a clearly identified
+open-source license. Therefore, no open-source license is claimed for the
+inherited/derived portions of this repository.
 
-````
-
+The original author's rights and attribution are respected. Any original
+contributions made in this repository should be considered separately from the
+inherited project code.
