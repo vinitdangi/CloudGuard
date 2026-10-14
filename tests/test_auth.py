@@ -1,7 +1,11 @@
 """Tests for CloudGuard account authentication."""
 
 import pytest
+from fastapi import HTTPException
+from starlette.requests import Request
 
+from api.auth import current_user, login_user, signup_user
+from api.schemas import LoginRequest, SignupRequest
 from auth.password import hash_password, verify_password
 from auth.service import AuthValidationError, DuplicateUserError, login, signup
 from auth.session import clear_session, establish_session
@@ -52,6 +56,66 @@ def test_login_accepts_username_and_email():
     signup("vinit_1", "vinit@example.com", "strongpass123", "strongpass123")
     assert login("vinit_1", "strongpass123").email == "vinit@example.com"
     assert login("VINIT@example.com", "strongpass123").username == "vinit_1"
+
+
+def test_api_signup_then_login_with_same_email_and_password():
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "scheme": "https",
+            "path": "/api/auth/signup",
+            "headers": [],
+            "query_string": b"",
+            "session": {},
+        }
+    )
+    signup_response = signup_user(
+        SignupRequest(
+            username="api_user",
+            email="same@example.com",
+            password="StrongPass123!",
+            confirmation="StrongPass123!",
+        ),
+        request,
+    )
+
+    login_response = login_user(
+        LoginRequest(login="same@example.com", password="StrongPass123!"),
+        request,
+    )
+
+    assert login_response.id == signup_response.id
+    assert login_response.username == "api_user"
+    assert request.session["user_id"] == signup_response.id
+    assert current_user(request).email == "same@example.com"
+
+
+def test_api_duplicate_signup_with_same_email_is_rejected():
+    signup("first_user", "same@example.com", "StrongPass123!", "StrongPass123!")
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "scheme": "https",
+            "path": "/api/auth/signup",
+            "headers": [],
+            "query_string": b"",
+            "session": {},
+        }
+    )
+
+    with pytest.raises(HTTPException) as error:
+        signup_user(
+            SignupRequest(
+                username="second_user",
+                email="SAME@example.com",
+                password="StrongPass123!",
+                confirmation="StrongPass123!",
+            ),
+            request,
+        )
+    assert error.value.status_code == 409
 
 
 @pytest.mark.parametrize(("login_value", "password"), [

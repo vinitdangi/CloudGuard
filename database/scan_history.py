@@ -60,10 +60,10 @@ def save_scan_history(
                 username, scan_timestamp, aws_account_id, aws_region,
                 security_score, total_findings, critical_count, high_count,
                 medium_count, low_count, passed_count
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id""",
             values,
         )
-        scan_history_id = int(cursor.lastrowid)
+        scan_history_id = int(cursor.fetchone()["id"])
         if scan_result is not None:
             safe_result = sanitize_scan_data(scan_result, sensitive_values)
             connection.execute(

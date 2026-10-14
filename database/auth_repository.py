@@ -1,8 +1,6 @@
 """Parameterized database operations for CloudGuard accounts."""
 
-import sqlite3
-
-from database.db import get_connection
+from database.db import get_connection, integrity_error_types
 from database.models import User
 
 
@@ -18,15 +16,16 @@ class AuthRepository:
         try:
             with get_connection() as connection:
                 cursor = connection.execute(
-                    "INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)",
+                    "INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?) RETURNING id",
                     (username, email, password_hash),
                 )
+                inserted_id = cursor.fetchone()["id"]
                 row = connection.execute(
                     "SELECT id, username, email, password_hash, created_at "
                     "FROM users WHERE id = ?",
-                    (cursor.lastrowid,),
+                    (inserted_id,),
                 ).fetchone()
-        except sqlite3.IntegrityError as exc:
+        except integrity_error_types() as exc:
             raise DuplicateUserError("Username or email is already registered.") from exc
         return User(**dict(row))
 
@@ -35,7 +34,7 @@ class AuthRepository:
         with get_connection() as connection:
             row = connection.execute(
                 "SELECT id, username, email, password_hash, created_at FROM users "
-                "WHERE username = ? COLLATE NOCASE OR email = ? COLLATE NOCASE",
+                "WHERE LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?)",
                 (login, login),
             ).fetchone()
         return User(**dict(row)) if row else None

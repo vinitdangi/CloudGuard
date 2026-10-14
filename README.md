@@ -59,6 +59,9 @@ controls. Create an account from the **Sign Up** form, then log in. Account
 records are stored in `data/cloudguard_users.sqlite3`; passwords are hashed
 with Argon2id. The local database is ignored by Git. Set
 `CLOUDGUARD_AUTH_DB` to use a different SQLite file location.
+For Railway, set `DATABASE_URL` to a reference to the PostgreSQL service's
+`DATABASE_URL` variable. When present, it takes precedence over the local SQLite
+setting; on Railway, the application fails at startup if it is missing.
 
 Start the dashboard with the existing command:
 
