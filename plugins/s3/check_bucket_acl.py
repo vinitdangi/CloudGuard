@@ -106,6 +106,6 @@ class Plugin(PluginInterface):
                 resource=bucket_name,
                 passed=False,
                 severity="MEDIUM",
-                issue=f"Failed to evaluate ACL: {str(e)}",
+                issue="Unable to evaluate the bucket ACL because AWS returned an error.",
                 recommendation="Verify s3:GetBucketAcl permissions."
             )

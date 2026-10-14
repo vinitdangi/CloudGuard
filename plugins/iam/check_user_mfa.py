@@ -73,7 +73,7 @@ class Plugin(PluginInterface):
                     key_data = usage_response.get('AccessKeyLastUsed', {})
                     last_used_date = key_data.get('LastUsedDate')
 
-                    resource_id = f"User: {username} | Key: {key_id}"
+                    resource_id = f"User: {username}"
 
                     if not last_used_date:
                         findings.append(
@@ -83,7 +83,7 @@ class Plugin(PluginInterface):
                                 resource=resource_id,
                                 passed=False,
                                 severity="HIGH",
-                                issue=f"Active Access Key {key_id} has NEVER been used",
+                                issue="An active IAM access key has never been used.",
                                 recommendation="Deactivate or delete unused IAM access keys to reduce attack surface",
                                 compliance=[cis_reference("iam_user_mfa")]
                             )
@@ -125,7 +125,7 @@ class Plugin(PluginInterface):
                     resource="IAM Service",
                     passed=False,
                     severity="HIGH",
-                    issue=f"Failed to scan IAM access keys: {str(e)}",
+                    issue="Unable to scan IAM access-key usage because AWS returned an error.",
                     recommendation="Verify iam:ListUsers and iam:GetAccessKeyLastUsed permissions",
                     compliance=[cis_reference("iam_user_mfa")]
                 )
@@ -148,7 +148,7 @@ class Plugin(PluginInterface):
                     resource="IAM Service",
                     passed=False,
                     severity="HIGH",
-                    issue=f"AWS API Error: {e.response['Error']['Message']}",
+                    issue="AWS returned an error while checking IAM user MFA.",
                     recommendation="Grant 'iam:ListUsers' permission to the CloudGuard IAM user",
                     compliance=[cis_reference("iam_user_mfa")]
                     
@@ -197,7 +197,7 @@ class Plugin(PluginInterface):
                         resource=resource_id,
                         passed=False,
                         severity="HIGH",
-                        issue=f"Could not check MFA status: {e.response['Error']['Message']}",
+                        issue="AWS returned an error while checking IAM user MFA.",
                         recommendation="Grant 'iam:ListMFADevices' permission",
                         compliance=[cis_reference("iam_user_mfa")]
                     )

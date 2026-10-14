@@ -19,7 +19,11 @@ def database_path() -> Path:
 def get_connection() -> Iterator[sqlite3.Connection]:
     """Open a SQLite connection with safe defaults and row-based access."""
     path = database_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        path.parent.chmod(0o700)
+    except OSError:
+        pass
     connection = sqlite3.connect(path, timeout=10)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
@@ -59,6 +63,13 @@ def initialize_database() -> None:
                 medium_count INTEGER NOT NULL,
                 low_count INTEGER NOT NULL,
                 passed_count INTEGER NOT NULL
+            )"""
+        )
+        connection.execute(
+            """CREATE TABLE IF NOT EXISTS scan_results (
+                scan_history_id INTEGER PRIMARY KEY,
+                scan_result_json TEXT NOT NULL,
+                FOREIGN KEY (scan_history_id) REFERENCES scan_history(id) ON DELETE CASCADE
             )"""
         )
 

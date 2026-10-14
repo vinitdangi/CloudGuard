@@ -3,7 +3,6 @@
 import html
 import io
 import json
-import re
 from collections import Counter
 from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping
@@ -23,6 +22,7 @@ from reportlab.platypus import (
     Table,
     TableStyle,
 )
+from cloudguard.utils.sanitization import sanitize_sensitive_data
 
 PROJECT_NAME = (
     "CloudGuard - AWS Cloud Security Misconfiguration Detection & "
@@ -41,38 +41,9 @@ SEVERITY_COLORS = {
     "LOW": colors.HexColor("#26734D"),
     "PASS": TEAL,
 }
-SENSITIVE_KEY_PARTS = (
-    "secret",
-    "password",
-    "credential",
-    "session",
-    "token",
-    "authorization",
-    "accesskey",
-)
-
-
-def _is_sensitive_key(key: Any) -> bool:
-    normalized = re.sub(r"[^a-z0-9]", "", str(key).lower())
-    return any(part in normalized for part in SENSITIVE_KEY_PARTS)
-
-
 def _sanitize(value: Any, sensitive_values: tuple[str, ...] = ()) -> Any:
     """Remove credential-shaped fields and supplied secret values recursively."""
-    if isinstance(value, Mapping):
-        return {
-            str(key): "[REDACTED]" if _is_sensitive_key(key) else _sanitize(item, sensitive_values)
-            for key, item in value.items()
-        }
-    if isinstance(value, (list, tuple, set)):
-        return [_sanitize(item, sensitive_values) for item in value]
-    if value is None or isinstance(value, (bool, int, float)):
-        return value
-    text = str(value)
-    for sensitive_value in sensitive_values:
-        if sensitive_value:
-            text = text.replace(sensitive_value, "[REDACTED]")
-    return text
+    return sanitize_sensitive_data(value, sensitive_values)
 
 
 def _finding_data(finding: Any, sensitive_values: tuple[str, ...]) -> dict[str, Any]:

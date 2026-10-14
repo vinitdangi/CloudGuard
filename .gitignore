@@ -4,8 +4,11 @@ venv/
 
 # Environment Variables
 .env
+.env.*
+!.env.example
 data/cloudguard_users.sqlite3
 data/cloudguard_users.sqlite3-*
+cookies.txt
 
 # Python Cache
 __pycache__/
@@ -25,6 +28,8 @@ logs/
 .coverage
 .pytest_cache
 .mypy_cache/
+node_modules/
+.next/
 
 cloudguard_report.json
 cloudguard_report.json

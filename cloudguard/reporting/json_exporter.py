@@ -3,10 +3,16 @@ from datetime import datetime
 from collections.abc import Mapping
 from cloudguard.findings import COLORS 
 from cloudguard.utils.logger import feeder
+from cloudguard.utils.sanitization import sanitize_sensitive_data
 
-def build_json_payload(all_findings, running_tasks, security_score=None):
+def build_json_payload(all_findings, running_tasks, security_score=None, sensitive_values=()):
     """Build the established JSON report structure, optionally with score data."""
-    findings_list = [finding.to_dict() for finding in all_findings]    
+    findings_list = [
+        finding.to_dict() if hasattr(finding, "to_dict") else dict(finding)
+        if isinstance(finding, Mapping)
+        else {"check": str(finding)}
+        for finding in all_findings
+    ]
     
     json_payload = {
         "scan_metadata": {
@@ -32,11 +38,11 @@ def build_json_payload(all_findings, running_tasks, security_score=None):
             "security_rating": score_data["rating"],
             "severity_summary": score_data["severity_summary"],
         })
-    return json_payload
+    return sanitize_sensitive_data(json_payload, tuple(sensitive_values))
 
 
-def export_to_json(all_findings, running_tasks, security_score=None):
-    json_payload = build_json_payload(all_findings, running_tasks, security_score)
+def export_to_json(all_findings, running_tasks, security_score=None, sensitive_values=()):
+    json_payload = build_json_payload(all_findings, running_tasks, security_score, sensitive_values)
     
     report_filename = "cloudguard_report.json"
     with open(report_filename, 'w', encoding='utf-8') as json_file:

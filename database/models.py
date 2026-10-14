@@ -1,6 +1,6 @@
 """Database models used by CloudGuard authentication."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -10,5 +10,5 @@ class User:
     id: int
     username: str
     email: str
-    password_hash: str
+    password_hash: str = field(repr=False)
     created_at: str

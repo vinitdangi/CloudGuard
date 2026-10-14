@@ -1,5 +1,6 @@
 from typing import Optional, List, Dict, Any
 from cloudguard.risk import RiskScorer
+from cloudguard.utils.sanitization import sanitize_sensitive_data
 COLORS = {
     "BLUE": "\033[94m",           # Used for Resource names
     "GREEN": "\033[92m",          # Used for [PASS]
@@ -64,8 +65,8 @@ class Finding:
     def __str__(self):
         if self.passed:
             pass_badge = f"{COLORS['GREEN']}[PASS]{COLORS['RESET']}"
-            msg = self.issue if self.issue else "Secure and compliant"
-            return f"  ↳ {pass_badge} {self.check}: {msg}"
+            msg = sanitize_sensitive_data(self.issue) if self.issue else "Secure and compliant"
+            return f"  ↳ {pass_badge} {sanitize_sensitive_data(self.check)}: {msg}"
         
         sev_val = str(self.severity).upper() if self.severity else "HIGH"
         
@@ -85,15 +86,15 @@ class Finding:
         
         return (
             f"  ↳ {sev_badge} {COLORS['BOLD']}{self.check}{COLORS['RESET']}\n"
-            f"      {issue_pointer} {self.issue}\n"
-            f"      {fix_pointer} {self.recommendation}"
+            f"      {issue_pointer} {sanitize_sensitive_data(self.issue)}\n"
+            f"      {fix_pointer} {sanitize_sensitive_data(self.recommendation)}"
         )
 
     def __repr__(self):
         return self.__str__()
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        return sanitize_sensitive_data({
             "finding_id":self.finding_id,
             "risk_score":self.risk_score,
             "impact":self.impact,
@@ -107,5 +108,4 @@ class Finding:
             "recommendation":self.recommendation if not self.passed else "No action required",
             "remediation":self.remediation if not self.passed else "",
             "compliance": self.compliance,
-        
-        }
+        })

@@ -116,7 +116,7 @@ def test_unused_access_key_is_flagged(monkeypatch):
     assert target_finding is not None
     assert target_finding.passed is False
     assert target_finding.severity == "HIGH"
-    assert access_key_id in target_finding.issue
+    assert access_key_id not in target_finding.issue
 
 def test_iam_user_without_keys_passes(iam_client):
 

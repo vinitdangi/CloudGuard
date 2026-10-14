@@ -1,6 +1,7 @@
 from collections import defaultdict
 from plugin_manager import PluginRegistry, load_all_plugins
 from cloudguard.findings import COLORS
+from cloudguard.utils.sanitization import sanitize_sensitive_data
 SEVERITY_ORDER={
     "CRITICAL":1,
     "HIGH":2,
@@ -58,17 +59,17 @@ class ScanEngine:
                     resource_grouped[res].append(f)
 
                 for resource, res_findings in resource_grouped.items():
-                    print(f"\n{COLORS['BLUE']}[RESOURCE]{COLORS['RESET']} {resource}\n")
+                    print(f"\n{COLORS['BLUE']}[RESOURCE]{COLORS['RESET']} {sanitize_sensitive_data(resource)}\n")
                     sorted_severity=sorted(res_findings,key=lambda f: SEVERITY_ORDER.get(
                             "PASS" if getattr(f, 'passed', False) else str(getattr(f, 'severity', 'HIGH')).upper(),
                             99
                         ))
                     for f in sorted_severity:
                         passed = getattr(f, 'passed', False)
-                        check_name = getattr(f, 'check', 'Check')
+                        check_name = sanitize_sensitive_data(getattr(f, 'check', 'Check'))
                         severity = str(getattr(f, 'severity', 'HIGH')).upper()
-                        issue = getattr(f, 'issue', '')
-                        recommendation = getattr(f, 'recommendation', '')
+                        issue = sanitize_sensitive_data(getattr(f, 'issue', ''))
+                        recommendation = sanitize_sensitive_data(getattr(f, 'recommendation', ''))
 
                         if not passed:
                             risk_score=getattr(f,"risk_score",None)

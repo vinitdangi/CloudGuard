@@ -1,14 +1,19 @@
+import html
 import os
 
 from datetime import datetime
 
 from cloudguard.findings import COLORS
 from cloudguard.utils.logger import feeder
+from cloudguard.utils.sanitization import sanitize_sensitive_data
 
 
 def export_to_html(all_findings, running_tasks):
 
-    findings_list = [finding.to_dict() for finding in all_findings]
+    findings_list = [
+        sanitize_sensitive_data(finding.to_dict() if hasattr(finding, "to_dict") else finding)
+        for finding in all_findings
+    ]
 
     table_rows = ""
 
@@ -22,25 +27,22 @@ def export_to_html(all_findings, running_tasks):
             else "PASS"
         )
 
-        resource = f.get("resource", "Global / Account")
-        check = f.get("check", "Security Check")
-        issue = f.get("issue", "Secure and compliant")
-        recommendation = f.get(
-            "recommendation",
-            "No action required"
-        )
+        resource = html.escape(str(f.get("resource", "Global / Account")), quote=True)
+        check = html.escape(str(f.get("check", "Security Check")), quote=True)
+        issue = html.escape(str(f.get("issue", "Secure and compliant")), quote=True)
+        recommendation = html.escape(str(f.get("recommendation", "No action required")), quote=True)
         compliance = f.get("compliance", [])
         cis_html = ""
         if compliance:
             compliance_blocks=[]
             
             for control in compliance:
-                framework=control.get("framework",'')
-                version=control.get("version",'')
-                control_id=control.get('control_id','')
-                title=control.get('title','')
-                mapping=control.get('mapping','')
-                note=control.get('note','')
+                framework=html.escape(str(control.get("framework", "")), quote=True)
+                version=html.escape(str(control.get("version", "")), quote=True)
+                control_id=html.escape(str(control.get("control_id", "")), quote=True)
+                title=html.escape(str(control.get("title", "")), quote=True)
+                mapping=html.escape(str(control.get("mapping", "")), quote=True)
+                note=html.escape(str(control.get("note", "")), quote=True)
                 
             
                 block = f"""
@@ -157,7 +159,7 @@ def export_to_html(all_findings, running_tasks):
         """
 
     tasks_str = (
-        ", ".join(running_tasks)
+        html.escape(", ".join(running_tasks), quote=True)
         if running_tasks
         else "All Plugins"
     )

@@ -83,6 +83,6 @@ class Plugin(PluginInterface):
                 resource=bucket_name,
                 passed=False,
                 severity="MEDIUM",
-                issue=f"Failed to check versioning: {str(e)}",
+                issue="Unable to check bucket versioning because AWS returned an error.",
                 recommendation="Verify s3:GetBucketVersioning permissions.",
             )

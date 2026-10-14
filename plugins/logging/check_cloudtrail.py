@@ -132,12 +132,12 @@ class Plugin(PluginInterface):
                     passed=False,
                     severity="HIGH",
                     category="Logging",
-                    issue=f"Unable to check CloudTrail logging: {str(e)}",
+                    issue="Unable to check CloudTrail logging because AWS returned an error.",
                     recommendation=(
                         "Verify CloudTrail permissions and AWS account configuration."
                     ),
                     impact="CloudTrail logging status could not be verified.",
-                    evidence={"error": str(e)},
+                    evidence={"error_type": type(e).__name__},
                 )
             )
 

@@ -21,6 +21,7 @@ from cloudguard.aws.configuration import (
 from cloudguard.reporting.pdf_exporter import generate_pdf_report
 from cloudguard.reporting.json_exporter import build_json_payload
 from cloudguard.security_score import calculate_security_score, deduplicate_findings
+from cloudguard.utils.sanitization import sanitize_sensitive_data
 from database.db import initialize_database
 from database.scan_history import get_scan_history, save_scan_history
 from engine.scan_engine import ScanEngine
@@ -41,13 +42,101 @@ def invalidate_aws_connection() -> None:
     """Require a fresh STS check after AWS configuration changes."""
     st.session_state["aws_connection_verified"] = False
     st.session_state.pop("aws_account_id", None)
+    st.session_state.pop("aws_verified_auth_method", None)
+    st.session_state.pop("aws_verified_region", None)
 
 
-def change_aws_auth_method() -> None:
-    """Clear manual credentials when switching authentication methods."""
-    invalidate_aws_connection()
-    st.session_state.pop("aws_access_key_id", None)
-    st.session_state.pop("aws_secret_access_key", None)
+def test_aws_connection_callback() -> None:
+    """Test the submitted AWS credentials, then discard the widget values."""
+    auth_method = st.session_state.get("aws_auth_method", AUTH_METHOD_ACCESS_KEY)
+    region = st.session_state.get("aws_region", AWS_REGIONS[0])
+    access_key_id = st.session_state.get("aws_access_key_id", "")
+    secret_access_key = st.session_state.get("aws_secret_access_key", "")
+    connection_session = None
+    try:
+        connection_session = create_aws_session(
+            auth_method, region, access_key_id, secret_access_key
+        )
+        account_id = test_aws_connection(connection_session)
+    except AWSConfigurationError as exc:
+        invalidate_aws_connection()
+        st.session_state["aws_operation_error"] = str(exc)
+    except Exception as exc:
+        invalidate_aws_connection()
+        st.session_state["aws_operation_error"] = (
+            f"AWS connection failed. {safe_connection_error(exc)}"
+        )
+    else:
+        st.session_state["aws_connection_verified"] = True
+        st.session_state["aws_account_id"] = account_id
+        st.session_state["aws_verified_auth_method"] = auth_method
+        st.session_state["aws_verified_region"] = region
+    finally:
+        st.session_state.pop("aws_access_key_id", None)
+        st.session_state.pop("aws_secret_access_key", None)
+        access_key_id = ""
+        secret_access_key = ""
+        connection_session = None
+
+
+def run_aws_scan_callback() -> None:
+    """Run a scan from submitted credentials and retain only sanitized output."""
+    auth_method = st.session_state.get("aws_auth_method", AUTH_METHOD_ACCESS_KEY)
+    region = st.session_state.get("aws_region", AWS_REGIONS[0])
+    access_key_id = st.session_state.get("aws_access_key_id", "")
+    secret_access_key = st.session_state.get("aws_secret_access_key", "")
+    session = None
+    try:
+        start_time = datetime.now()
+        session = create_aws_session(
+            auth_method, region, access_key_id, secret_access_key
+        )
+        account_id = test_aws_connection(session)
+        findings, metadata = ScanEngine(session=session).run()
+        findings = deduplicate_findings(findings)
+        security_score = calculate_security_score(findings)
+        sensitive_values = (access_key_id, secret_access_key)
+
+        serialized_findings = []
+        for finding in findings:
+            if hasattr(finding, "to_dict"):
+                serialized_findings.append(finding.to_dict())
+            elif isinstance(finding, dict):
+                serialized_findings.append(finding)
+
+        st.session_state["scan_findings"] = sanitize_sensitive_data(
+            serialized_findings, sensitive_values=sensitive_values
+        )
+        st.session_state["scan_metadata"] = sanitize_sensitive_data(
+            metadata or {}, sensitive_values=sensitive_values
+        )
+        st.session_state["scan_security_score"] = security_score
+        st.session_state["scan_duration"] = (
+            datetime.now() - start_time
+        ).total_seconds()
+        st.session_state["scan_timestamp"] = datetime.now(timezone.utc).isoformat(
+            timespec="seconds"
+        )
+        st.session_state["aws_connection_verified"] = True
+        st.session_state["aws_account_id"] = account_id
+        st.session_state["aws_verified_auth_method"] = auth_method
+        st.session_state["aws_verified_region"] = region
+        st.session_state["scan_completed"] = True
+    except AWSConfigurationError as exc:
+        invalidate_aws_connection()
+        st.session_state["scan_error"] = str(exc)
+    except Exception:
+        invalidate_aws_connection()
+        st.session_state["scan_error"] = (
+            "CloudGuard scan failed. Verify AWS credentials, region, network "
+            "access, and required read-only permissions."
+        )
+    finally:
+        st.session_state.pop("aws_access_key_id", None)
+        st.session_state.pop("aws_secret_access_key", None)
+        access_key_id = ""
+        secret_access_key = ""
+        session = None
 
 
 def logout() -> None:
@@ -148,60 +237,53 @@ st.sidebar.button("Logout", on_click=logout)
 st.header("AWS Cloud Configuration")
 st.caption("Configure a temporary AWS connection for a read-only security assessment.")
 st.info(
-    "Credentials stay in this authenticated Streamlit session and are not saved "
-    "to CloudGuard's database or reports. CloudGuard uses them only for AWS checks."
+    "Access keys are requested separately for each connection test or scan and "
+    "cleared when that form is submitted. They are never retained in the session."
 )
 
-auth_method = st.radio(
-    "Authentication Method",
-    [AUTH_METHOD_ACCESS_KEY, AUTH_METHOD_ENVIRONMENT],
-    horizontal=True,
-    key="aws_auth_method",
-    on_change=change_aws_auth_method,
-)
-region = st.selectbox(
-    "AWS Region",
-    AWS_REGIONS,
-    index=AWS_REGIONS.index("ap-southeast-2"),
-    key="aws_region",
-    on_change=invalidate_aws_connection,
-)
-
-access_key_id = ""
-secret_access_key = ""
-if auth_method == AUTH_METHOD_ACCESS_KEY:
-    access_key_id = st.text_input(
-        "AWS Access Key ID",
-        key="aws_access_key_id",
-        on_change=invalidate_aws_connection,
+with st.form("aws_operation_form", clear_on_submit=True):
+    auth_method = st.radio(
+        "Authentication Method",
+        [AUTH_METHOD_ACCESS_KEY, AUTH_METHOD_ENVIRONMENT],
+        horizontal=True,
+        key="aws_auth_method",
     )
-    secret_access_key = st.text_input(
-        "AWS Secret Access Key",
-        type="password",
-        key="aws_secret_access_key",
-        on_change=invalidate_aws_connection,
+    region = st.selectbox(
+        "AWS Region",
+        AWS_REGIONS,
+        index=AWS_REGIONS.index("ap-southeast-2"),
+        key="aws_region",
     )
-else:
-    st.caption("Uses the existing boto3 credential chain (AWS CLI, environment, or IAM role).")
 
-if st.button("Test AWS Connection", type="secondary"):
-    try:
-        connection_session = create_aws_session(
-            auth_method,
-            region,
-            access_key_id,
-            secret_access_key,
+    access_key_id = ""
+    secret_access_key = ""
+    if auth_method == AUTH_METHOD_ACCESS_KEY:
+        st.text_input("AWS Access Key ID", key="aws_access_key_id")
+        secret_access_key = st.text_input(
+            "AWS Secret Access Key", type="password", key="aws_secret_access_key"
         )
-        account_id = test_aws_connection(connection_session)
-    except AWSConfigurationError as exc:
-        invalidate_aws_connection()
-        st.error(str(exc))
-    except Exception as exc:
-        invalidate_aws_connection()
-        st.error(f"AWS connection failed. {safe_connection_error(exc)}")
     else:
-        st.session_state["aws_connection_verified"] = True
-        st.session_state["aws_account_id"] = account_id
+        st.caption("Uses the existing boto3 credential chain (AWS CLI, environment, or IAM role).")
+
+    st.form_submit_button(
+        "Test AWS Connection",
+        type="secondary",
+        on_click=test_aws_connection_callback,
+    )
+    st.form_submit_button(
+        "Run Cloud Security Scan",
+        type="primary",
+        on_click=run_aws_scan_callback,
+    )
+
+if error_message := st.session_state.pop("aws_operation_error", None):
+    st.error(error_message)
+
+if error_message := st.session_state.pop("scan_error", None):
+    st.error(error_message)
+
+if auth_method != st.session_state.get("aws_verified_auth_method") or region != st.session_state.get("aws_verified_region"):
+    invalidate_aws_connection()
 
 if st.session_state.get("aws_connection_verified"):
     st.success("AWS connection successful")
@@ -211,39 +293,12 @@ else:
 
 # Scan Execution
 
-if st.sidebar.button(
-    " Run Cloud Security Scan",
-    type="primary",
-    disabled=not st.session_state.get("aws_connection_verified", False),
-):
-
-    with st.spinner("Scanning AWS Environment. Please wait..."):
-
-        start_time = datetime.now()
-
-        try:
-            session = create_aws_session(
-                st.session_state["aws_auth_method"],
-                st.session_state["aws_region"],
-                st.session_state.get("aws_access_key_id", ""),
-                st.session_state.get("aws_secret_access_key", ""),
-            )
-
-            # Use the same ScanEngine as the CLI
-            engine = ScanEngine(session=session)
-
-            findings, metadata = engine.run()
-
-        except Exception:
-            st.error(
-                "CloudGuard scan failed. Verify AWS credentials, region, network "
-                "access, and required read-only permissions."
-            )
-            st.stop()
-
-        end_time = datetime.now()
-        duration = (end_time - start_time).total_seconds()
-        scan_timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+if st.session_state.pop("scan_completed", False):
+    findings = st.session_state["scan_findings"]
+    metadata = st.session_state["scan_metadata"]
+    security_score = st.session_state["scan_security_score"]
+    duration = st.session_state["scan_duration"]
+    scan_timestamp = st.session_state["scan_timestamp"]
 
 
     st.success("Scan Completed!")
@@ -408,7 +463,11 @@ if st.sidebar.button(
         st.subheader("Export Assessment Data")
 
         json_report = json.dumps(
-            build_json_payload(findings, ["All"], security_score),
+            build_json_payload(
+                findings,
+                ["All"],
+                security_score,
+            ),
             indent=4,
         )
 
@@ -442,10 +501,6 @@ if st.sidebar.button(
                 "cloudguard_version": "v1.0.0",
             },
             security_score=security_score,
-            sensitive_values=(
-                st.session_state.get("aws_access_key_id", ""),
-                st.session_state.get("aws_secret_access_key", ""),
-            ),
         )
     except Exception as exc:
         logger.error("PDF report generation failed (%s)", type(exc).__name__)

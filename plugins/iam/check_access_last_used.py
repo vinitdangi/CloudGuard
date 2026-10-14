@@ -74,7 +74,7 @@ class Plugin(PluginInterface):
                                 resource=resource_id,
                                 passed=False,
                                 severity="HIGH",
-                                issue=f"Active Access Key {key_id} has NEVER been used.",
+                                issue="An active IAM access key has never been used.",
                                 recommendation="Deactivate or delete unused IAM access keys to reduce attack surface."
                             )
                         )
@@ -113,7 +113,7 @@ class Plugin(PluginInterface):
                     resource="IAM Service",
                     passed=False,
                     severity="HIGH",
-                    issue=f"Failed to scan IAM access keys: {str(e)}",
+                    issue="Unable to scan IAM access-key usage because AWS returned an error.",
                     recommendation="Verify iam:ListUsers and iam:GetAccessKeyLastUsed permissions."
                 )
             )

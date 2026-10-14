@@ -60,7 +60,7 @@ class Plugin(PluginInterface):
                 resource=bucket_name,
                 passed=False,
                 severity="MEDIUM",
-                issue=f"Failed to fetch configuration: {str(e)}",
+                issue="Unable to fetch bucket logging configuration because AWS returned an error.",
                 recommendation="Verify IAM permissions for s3:GetBucketLogging.",
             )
 

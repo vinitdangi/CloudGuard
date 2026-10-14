@@ -39,3 +39,13 @@ class AuthRepository:
                 (login, login),
             ).fetchone()
         return User(**dict(row)) if row else None
+
+    @staticmethod
+    def find_by_id(user_id: int) -> User | None:
+        with get_connection() as connection:
+            row = connection.execute(
+                "SELECT id, username, email, password_hash, created_at "
+                "FROM users WHERE id = ?",
+                (user_id,),
+            ).fetchone()
+        return User(**dict(row)) if row else None

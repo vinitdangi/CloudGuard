@@ -1,8 +1,12 @@
-"""Safe persistence and retrieval for scan-history summaries."""
+"""Safe persistence and retrieval for scan history and complete scan results."""
 
+import json
+from collections.abc import Mapping
 from typing import Any
 
 from database.db import get_connection
+from cloudguard.utils.sanitization import sanitize_sensitive_data as sanitize_scan_data
+
 
 SCAN_HISTORY_FIELDS = (
     "id",
@@ -33,8 +37,10 @@ def save_scan_history(
     medium_count: int,
     low_count: int,
     passed_count: int,
+    scan_result: Mapping[str, Any] | None = None,
+    sensitive_values: tuple[str, ...] = (),
 ) -> int:
-    """Insert only the explicitly supported, non-credential scan fields."""
+    """Insert a summary and optional sanitized full result without credentials."""
     values = (
         username,
         scan_timestamp,
@@ -57,7 +63,14 @@ def save_scan_history(
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             values,
         )
-        return int(cursor.lastrowid)
+        scan_history_id = int(cursor.lastrowid)
+        if scan_result is not None:
+            safe_result = sanitize_scan_data(scan_result, sensitive_values)
+            connection.execute(
+                "INSERT INTO scan_results (scan_history_id, scan_result_json) VALUES (?, ?)",
+                (scan_history_id, json.dumps(safe_result, ensure_ascii=True, separators=(",", ":"))),
+            )
+        return scan_history_id
 
 
 def get_scan_history(username: str) -> list[dict[str, Any]]:
@@ -70,3 +83,21 @@ def get_scan_history(username: str) -> list[dict[str, Any]]:
             (username,),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def get_latest_scan_result(username: str) -> dict[str, Any] | None:
+    """Return the latest complete result for one user, never another user's data."""
+    with get_connection() as connection:
+        row = connection.execute(
+            """SELECT results.scan_result_json
+               FROM scan_results AS results
+               JOIN scan_history AS history ON history.id = results.scan_history_id
+               WHERE history.username = ?
+               ORDER BY history.scan_timestamp DESC, history.id DESC
+               LIMIT 1""",
+            (username,),
+        ).fetchone()
+    if row is None:
+        return None
+    result = json.loads(row["scan_result_json"])
+    return result if isinstance(result, dict) else None
