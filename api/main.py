@@ -15,6 +15,8 @@ from api.aws import router as aws_router
 from database.db import initialize_database
 
 
+PRODUCTION_FRONTEND_ORIGIN = "https://cloud-guard-frontend-five.vercel.app"
+
 environment = os.getenv("CLOUDGUARD_ENVIRONMENT", "development").strip().lower()
 if environment not in {"development", "production"}:
     raise RuntimeError("CLOUDGUARD_ENVIRONMENT must be development or production.")
@@ -58,6 +60,11 @@ def _configured_origins() -> list[str]:
         ):
             raise RuntimeError("Production allowed origins must use HTTPS and must not be localhost.")
         origins.append(f"{parsed.scheme}://{parsed.netloc}")
+    if environment == "production" and PRODUCTION_FRONTEND_ORIGIN not in origins:
+        raise RuntimeError(
+            "CLOUDGUARD_ALLOWED_ORIGINS must include "
+            f"{PRODUCTION_FRONTEND_ORIGIN!r} in production."
+        )
     return origins
 
 
