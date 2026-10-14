@@ -17,9 +17,15 @@ from database.db import initialize_database
 
 PRODUCTION_FRONTEND_ORIGIN = "https://cloud-guard-frontend-five.vercel.app"
 
-environment = os.getenv("CLOUDGUARD_ENVIRONMENT", "development").strip().lower()
+running_on_render = os.getenv("RENDER", "").strip().lower() == "true"
+environment = os.getenv(
+    "CLOUDGUARD_ENVIRONMENT",
+    "production" if running_on_render else "development",
+).strip().lower()
 if environment not in {"development", "production"}:
     raise RuntimeError("CLOUDGUARD_ENVIRONMENT must be development or production.")
+if running_on_render and environment != "production":
+    raise RuntimeError("CloudGuard on Render must use CLOUDGUARD_ENVIRONMENT=production.")
 
 session_secret = os.getenv("CLOUDGUARD_SESSION_SECRET", "").strip()
 if not session_secret:
@@ -35,7 +41,9 @@ def _configured_origins() -> list[str]:
     configured = os.getenv("CLOUDGUARD_ALLOWED_ORIGINS", "").strip()
     if not configured:
         if environment == "production":
-            raise RuntimeError("CLOUDGUARD_ALLOWED_ORIGINS must contain the deployed frontend origin in production.")
+            # Pin the production frontend origin in code so a missing Render
+            # variable cannot silently leave production accepting localhost only.
+            return [PRODUCTION_FRONTEND_ORIGIN]
         return ["http://localhost:3000"]
 
     configured_origins = [origin.strip() for origin in configured.split(",") if origin.strip()]
@@ -60,10 +68,10 @@ def _configured_origins() -> list[str]:
         ):
             raise RuntimeError("Production allowed origins must use HTTPS and must not be localhost.")
         origins.append(f"{parsed.scheme}://{parsed.netloc}")
-    if environment == "production" and PRODUCTION_FRONTEND_ORIGIN not in origins:
+    if environment == "production" and origins != [PRODUCTION_FRONTEND_ORIGIN]:
         raise RuntimeError(
-            "CLOUDGUARD_ALLOWED_ORIGINS must include "
-            f"{PRODUCTION_FRONTEND_ORIGIN!r} in production."
+            "Production CORS allows only "
+            f"{PRODUCTION_FRONTEND_ORIGIN!r}; update CLOUDGUARD_ALLOWED_ORIGINS."
         )
     return origins
 

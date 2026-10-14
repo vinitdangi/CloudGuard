@@ -1,4 +1,4 @@
-"""Production CORS and cross-origin session-cookie configuration tests."""
+"""Render production and local-development CORS/session regression tests."""
 
 import asyncio
 import importlib
@@ -7,17 +7,18 @@ import pytest
 
 
 PRODUCTION_ORIGIN = "https://cloud-guard-frontend-five.vercel.app"
-ADDITIONAL_PRODUCTION_ORIGIN = "https://admin.cloudguard.example"
+OTHER_ORIGIN = "https://other-frontend.example"
 
 
 def _reset_to_local_configuration(monkeypatch, app_module):
+    monkeypatch.delenv("RENDER", raising=False)
     monkeypatch.setenv("CLOUDGUARD_ENVIRONMENT", "development")
     monkeypatch.setenv("CLOUDGUARD_SESSION_SECRET", "local-test-session-secret")
-    monkeypatch.setenv("CLOUDGUARD_ALLOWED_ORIGINS", "http://localhost:3000")
+    monkeypatch.delenv("CLOUDGUARD_ALLOWED_ORIGINS", raising=False)
     importlib.reload(app_module)
 
 
-async def _request_preflight(app):
+async def _request_preflight(app, origin=PRODUCTION_ORIGIN):
     sent_messages = []
 
     async def receive():
@@ -37,7 +38,7 @@ async def _request_preflight(app):
         "query_string": b"",
         "root_path": "",
         "headers": [
-            (b"origin", PRODUCTION_ORIGIN.encode()),
+            (b"origin", origin.encode()),
             (b"access-control-request-method", b"POST"),
             (b"access-control-request-headers", b"accept,content-type"),
         ],
@@ -48,17 +49,23 @@ async def _request_preflight(app):
     return sent_messages
 
 
-def test_production_cors_allows_vercel_credentialed_login_preflight(monkeypatch):
-    monkeypatch.setenv("CLOUDGUARD_ENVIRONMENT", "production")
+def _response_from(messages):
+    response = next(message for message in messages if message["type"] == "http.response.start")
+    headers = {name.decode().lower(): value.decode() for name, value in response["headers"]}
+    return response, headers
+
+
+def test_render_production_allows_exact_credentialed_vercel_preflight(monkeypatch):
+    monkeypatch.setenv("RENDER", "true")
+    monkeypatch.delenv("CLOUDGUARD_ENVIRONMENT", raising=False)
     monkeypatch.setenv("CLOUDGUARD_SESSION_SECRET", "p" * 48)
-    monkeypatch.setenv(
-        "CLOUDGUARD_ALLOWED_ORIGINS",
-        f"{PRODUCTION_ORIGIN},{ADDITIONAL_PRODUCTION_ORIGIN}",
-    )
+    monkeypatch.delenv("CLOUDGUARD_ALLOWED_ORIGINS", raising=False)
     from api import main
 
     app_module = importlib.reload(main)
     try:
+        assert app_module.environment == "production"
+        assert app_module.allowed_origins == [PRODUCTION_ORIGIN]
         cors_config = next(
             middleware.kwargs
             for middleware in app_module.app.user_middleware
@@ -69,41 +76,66 @@ def test_production_cors_allows_vercel_credentialed_login_preflight(monkeypatch)
             for middleware in app_module.app.user_middleware
             if middleware.cls.__name__ == "SessionMiddleware"
         )
-        assert PRODUCTION_ORIGIN in cors_config["allow_origins"]
+        assert cors_config["allow_origins"] == [PRODUCTION_ORIGIN]
         assert cors_config["allow_credentials"] is True
         assert session_config["same_site"] == "none"
         assert session_config["https_only"] is True
 
-        messages = asyncio.run(_request_preflight(app_module.app))
-        response = next(message for message in messages if message["type"] == "http.response.start")
-        headers = {
-            name.decode().lower(): value.decode()
-            for name, value in response["headers"]
-        }
+        response, headers = _response_from(
+            asyncio.run(_request_preflight(app_module.app))
+        )
         assert response["status"] in {200, 204}
         assert headers["access-control-allow-origin"] == PRODUCTION_ORIGIN
         assert headers["access-control-allow-credentials"] == "true"
         assert "post" in headers["access-control-allow-methods"].lower()
         assert "content-type" in headers["access-control-allow-headers"].lower()
+
+        rejected, rejected_headers = _response_from(
+            asyncio.run(_request_preflight(app_module.app, OTHER_ORIGIN))
+        )
+        assert rejected["status"] == 400
+        assert "access-control-allow-origin" not in rejected_headers
     finally:
         _reset_to_local_configuration(monkeypatch, app_module)
 
 
 @pytest.mark.parametrize(
-    "configured_origins",
-    ["", "https://other-frontend.example"],
-    ids=["missing-origins", "missing-vercel-origin"],
+    ("environment", "configured_origins", "message"),
+    [
+        ("production", OTHER_ORIGIN, "Production CORS allows only"),
+        ("development", None, "must use CLOUDGUARD_ENVIRONMENT=production"),
+    ],
+    ids=["production-origin-mismatch", "render-explicit-development-mode"],
 )
-def test_production_cors_fails_startup_without_required_origin(
-    monkeypatch, configured_origins
+def test_render_rejects_misconfigured_cors_environment(
+    monkeypatch, environment, configured_origins, message
 ):
-    monkeypatch.setenv("CLOUDGUARD_ENVIRONMENT", "production")
+    monkeypatch.setenv("RENDER", "true")
+    monkeypatch.setenv("CLOUDGUARD_ENVIRONMENT", environment)
     monkeypatch.setenv("CLOUDGUARD_SESSION_SECRET", "p" * 48)
-    monkeypatch.setenv("CLOUDGUARD_ALLOWED_ORIGINS", configured_origins)
+    if configured_origins is None:
+        monkeypatch.delenv("CLOUDGUARD_ALLOWED_ORIGINS", raising=False)
+    else:
+        monkeypatch.setenv("CLOUDGUARD_ALLOWED_ORIGINS", configured_origins)
     from api import main
 
     try:
-        with pytest.raises(RuntimeError, match="CLOUDGUARD_ALLOWED_ORIGINS"):
+        with pytest.raises(RuntimeError, match=message):
             importlib.reload(main)
     finally:
         _reset_to_local_configuration(monkeypatch, main)
+
+
+def test_local_development_defaults_to_localhost(monkeypatch):
+    monkeypatch.delenv("RENDER", raising=False)
+    monkeypatch.setenv("CLOUDGUARD_ENVIRONMENT", "development")
+    monkeypatch.setenv("CLOUDGUARD_SESSION_SECRET", "local-test-session-secret")
+    monkeypatch.delenv("CLOUDGUARD_ALLOWED_ORIGINS", raising=False)
+    from api import main
+
+    app_module = importlib.reload(main)
+    try:
+        assert app_module.environment == "development"
+        assert app_module.allowed_origins == ["http://localhost:3000"]
+    finally:
+        _reset_to_local_configuration(monkeypatch, app_module)
