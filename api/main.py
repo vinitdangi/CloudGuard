@@ -41,8 +41,6 @@ def _configured_origins() -> list[str]:
     configured = os.getenv("CLOUDGUARD_ALLOWED_ORIGINS", "").strip()
     if not configured:
         if environment == "production":
-            # Pin the production frontend origin in code so a missing Render
-            # variable cannot silently leave production accepting localhost only.
             return [PRODUCTION_FRONTEND_ORIGIN]
         return ["http://localhost:3000"]
 
@@ -62,17 +60,21 @@ def _configured_origins() -> list[str]:
             or parsed.password
         ):
             raise RuntimeError("CLOUDGUARD_ALLOWED_ORIGINS must contain valid origin URLs only.")
-        if environment == "production" and (
-            parsed.scheme != "https"
-            or parsed.hostname in {"localhost", "127.0.0.1", "::1"}
-        ):
-            raise RuntimeError("Production allowed origins must use HTTPS and must not be localhost.")
+        if environment == "production":
+            if (
+                parsed.scheme != "https"
+                or parsed.hostname is None
+                or not parsed.hostname.endswith(".vercel.app")
+                or parsed.port is not None
+            ):
+                raise RuntimeError(
+                    "Production allowed origins must be HTTPS Vercel origins without custom ports."
+                )
         origins.append(f"{parsed.scheme}://{parsed.netloc}")
-    if environment == "production" and origins != [PRODUCTION_FRONTEND_ORIGIN]:
-        raise RuntimeError(
-            "Production CORS allows only "
-            f"{PRODUCTION_FRONTEND_ORIGIN!r}; update CLOUDGUARD_ALLOWED_ORIGINS."
-        )
+    if environment == "production":
+        # The canonical origin is always allowed; preview deployment origins
+        # are opt-in as exact comma-separated entries in the environment.
+        return list(dict.fromkeys([PRODUCTION_FRONTEND_ORIGIN, *origins]))
     return origins
 
 
