@@ -58,8 +58,6 @@ def _configured_origins() -> list[str]:
         ):
             raise RuntimeError("Production allowed origins must use HTTPS and must not be localhost.")
         origins.append(f"{parsed.scheme}://{parsed.netloc}")
-    if environment == "production" and len(origins) != 1:
-        raise RuntimeError("Production must allow exactly one deployed CloudGuard frontend origin.")
     return origins
 
 
@@ -93,7 +91,7 @@ app.add_middleware(
     secret_key=session_secret,
     session_cookie="cloudguard_session",
     max_age=3600,
-    same_site="lax",
+    same_site="none" if environment == "production" else "lax",
     https_only=environment == "production",
 )
 
