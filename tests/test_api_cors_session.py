@@ -17,6 +17,7 @@ OTHER_ORIGIN = "https://other-frontend.example"
 
 def _reset_to_local_configuration(monkeypatch, app_module):
     monkeypatch.delenv("RENDER", raising=False)
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
     monkeypatch.setenv("CLOUDGUARD_ENVIRONMENT", "development")
     monkeypatch.setenv("CLOUDGUARD_SESSION_SECRET", "local-test-session-secret")
     monkeypatch.delenv("CLOUDGUARD_ALLOWED_ORIGINS", raising=False)
@@ -156,6 +157,20 @@ def test_render_rejects_misconfigured_cors_environment(
         _reset_to_local_configuration(monkeypatch, main)
 
 
+def test_railway_requires_production_environment(monkeypatch):
+    monkeypatch.delenv("RENDER", raising=False)
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
+    monkeypatch.setenv("CLOUDGUARD_ENVIRONMENT", "development")
+    monkeypatch.setenv("CLOUDGUARD_SESSION_SECRET", "p" * 48)
+    from api import main
+
+    try:
+        with pytest.raises(RuntimeError, match="CloudGuard on Railway must use"):
+            importlib.reload(main)
+    finally:
+        _reset_to_local_configuration(monkeypatch, main)
+
+
 def test_local_development_defaults_to_localhost(monkeypatch):
     monkeypatch.delenv("RENDER", raising=False)
     monkeypatch.setenv("CLOUDGUARD_ENVIRONMENT", "development")
@@ -171,8 +186,9 @@ def test_local_development_defaults_to_localhost(monkeypatch):
         _reset_to_local_configuration(monkeypatch, app_module)
 
 
-def test_production_login_cookie_authenticates_followup_me_request(monkeypatch, tmp_path):
-    monkeypatch.setenv("RENDER", "true")
+def test_railway_production_login_cookie_authenticates_followup_me_request(monkeypatch, tmp_path):
+    monkeypatch.delenv("RENDER", raising=False)
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
     monkeypatch.delenv("CLOUDGUARD_ENVIRONMENT", raising=False)
     monkeypatch.setenv("CLOUDGUARD_SESSION_SECRET", "p" * 48)
     monkeypatch.setenv("CLOUDGUARD_AUTH_DB", str(tmp_path / "auth.sqlite3"))
@@ -181,6 +197,19 @@ def test_production_login_cookie_authenticates_followup_me_request(monkeypatch, 
 
     app_module = importlib.reload(main)
     try:
+        assert app_module.environment == "production"
+        assert app_module.allowed_origins == [PRODUCTION_ORIGIN]
+        session_config = next(
+            middleware.kwargs
+            for middleware in app_module.app.user_middleware
+            if middleware.cls.__name__ == "SessionMiddleware"
+        )
+        assert session_config["same_site"] == "none"
+        assert session_config["https_only"] is True
+
+        # Keep this isolated regression on SQLite after application config has
+        # captured Railway's production environment.
+        monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
         initialize_database()
         signup("session_user", "session@example.com", "StrongPass123!", "StrongPass123!")
 
@@ -205,6 +234,8 @@ def test_production_login_cookie_authenticates_followup_me_request(monkeypatch, 
         assert "secure" in cookie_attributes
         assert "httponly" in cookie_attributes
         assert "samesite=none" in cookie_attributes
+        assert "path=/" in cookie_attributes
+        assert "domain=" not in cookie_attributes
         cookie_pair = set_cookie.split(";", 1)[0]
 
         me_response, me_headers, me_body = _response_from(

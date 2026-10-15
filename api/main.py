@@ -18,14 +18,17 @@ from database.db import initialize_database
 PRODUCTION_FRONTEND_ORIGIN = "https://cloud-guard-frontend-five.vercel.app"
 
 running_on_render = os.getenv("RENDER", "").strip().lower() == "true"
+running_on_railway = bool(os.getenv("RAILWAY_ENVIRONMENT", "").strip())
 environment = os.getenv(
     "CLOUDGUARD_ENVIRONMENT",
-    "production" if running_on_render else "development",
+    "production" if running_on_render or running_on_railway else "development",
 ).strip().lower()
 if environment not in {"development", "production"}:
     raise RuntimeError("CLOUDGUARD_ENVIRONMENT must be development or production.")
 if running_on_render and environment != "production":
     raise RuntimeError("CloudGuard on Render must use CLOUDGUARD_ENVIRONMENT=production.")
+if running_on_railway and environment != "production":
+    raise RuntimeError("CloudGuard on Railway must use CLOUDGUARD_ENVIRONMENT=production.")
 
 session_secret = os.getenv("CLOUDGUARD_SESSION_SECRET", "").strip()
 if not session_secret:
