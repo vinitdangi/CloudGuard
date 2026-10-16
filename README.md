@@ -1,4 +1,22 @@
+<div align="center">
+
+<img src="assets/cloudguard-logo.png" alt="CloudGuard Logo" width="420">
+
 # CloudGuard
+
+### AWS Cloud Security Misconfiguration Detection & Risk Assessment Platform
+
+[![Python](https://img.shields.io/badge/Python-3.13-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-Next.js-blue?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![AWS](https://img.shields.io/badge/Cloud-AWS-orange?logo=amazonaws&logoColor=white)](https://aws.amazon.com/)
+[![Boto3](https://img.shields.io/badge/AWS%20SDK-Boto3-yellow?logo=amazonaws&logoColor=black)](https://boto3.amazonaws.com/)
+
+**Detect misconfigurations. Assess risk. Improve your AWS security posture.**
+
+</div>
+
+---
 
 **A web-based AWS cloud security misconfiguration detection and risk assessment platform.**
 
