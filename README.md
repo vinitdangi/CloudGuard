@@ -248,11 +248,25 @@ CloudGuard provides a PDF report and a JSON export for the latest persisted scan
 
 ### Attribution
 
-This project is based on and extends the original CloudGuard project by Mohsan Razaq.
+CloudGuard began from an earlier CloudGuard codebase by Mohsan Razaq. The current repository has been substantially redesigned, extended, and developed by **Vinit Dangi**.
+
+Major project-specific development includes:
+
+- AWS security assessment and scanning workflow
+- IAM, S3, Security Groups, NACL, and CloudTrail checks
+- Authentication and user management
+- FastAPI backend and API integration
+- Next.js frontend and CloudGuard UI
+- Security score and risk assessment system
+- Scan history and reporting
+- PDF and JSON security reports
+- CloudGuard branding and documentation
 
 Original repository: [MohsanRazaq/CloudGuard](https://github.com/MohsanRazaq/CloudGuard)
 
-The original project's architecture and implementation were used as a starting point. Original authorship is acknowledged; this repository also contains project-specific changes and extensions.
+The current repository should be understood as a substantially extended and redesigned implementation rather than a direct copy of the original project.
+
+> **Developer:** Vinit Dangi — BCA | Cloud Security & AWS Security
 
 ### License
 
