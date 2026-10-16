@@ -242,35 +242,12 @@ CloudGuard provides a PDF report and a JSON export for the latest persisted scan
 
 **Title:** Cloud Guard : A Web-Based AWS Cloud Security Misconfiguration Detection and Risk Assessment System
 
-**Developer:** Vinit Dangi
+## Developer
 
-**Program:** BCA — Cloud Security
+**Vinit Dangi**  
+BCA — Cloud Security
 
-### Attribution
-
-CloudGuard began from an earlier CloudGuard codebase by Mohsan Razaq. The current repository has been substantially redesigned, extended, and developed by **Vinit Dangi**.
-
-Major project-specific development includes:
-
-- AWS security assessment and scanning workflow
-- IAM, S3, Security Groups, NACL, and CloudTrail checks
-- Authentication and user management
-- FastAPI backend and API integration
-- Next.js frontend and CloudGuard UI
-- Security score and risk assessment system
-- Scan history and reporting
-- PDF and JSON security reports
-- CloudGuard branding and documentation
-
-Original repository: [MohsanRazaq/CloudGuard](https://github.com/MohsanRazaq/CloudGuard)
-
-The current repository should be understood as a substantially extended and redesigned implementation rather than a direct copy of the original project.
-
-> **Developer:** Vinit Dangi — BCA | Cloud Security & AWS Security
-
-### License
-
-The original CloudGuard repository does not currently provide a clearly identified open-source license. This repository therefore does not claim an open-source license for inherited or derived portions of the project. The original author's rights and attribution are respected.
+CloudGuard is a web-based AWS cloud security misconfiguration detection and risk assessment platform developed by Vinit Dangi.
 
 ## Final Project Status
 
