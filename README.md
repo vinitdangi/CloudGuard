@@ -184,6 +184,19 @@ streamlit run dashboard/app.py
 
 These local tools are separate from the production Next.js web application.
 
+Streamlit sign-up verifies the supplied email before allowing the new account to log in. Configure SMTP and the keyed OTP digest secret before enabling registration. Set these as environment variables locally or as top-level Streamlit secrets in hosted deployments:
+
+```text
+CLOUDGUARD_OTP_SECRET=<random secret of at least 32 characters>
+CLOUDGUARD_SMTP_HOST=<SMTP server>
+CLOUDGUARD_SMTP_PORT=587
+CLOUDGUARD_SMTP_USERNAME=<SMTP username>
+CLOUDGUARD_SMTP_PASSWORD=<SMTP password>
+CLOUDGUARD_EMAIL_FROM=<verified sender address>
+```
+
+Port 587 uses STARTTLS; port 465 uses implicit TLS. OTP codes expire after five minutes, are stored only as keyed digests, and can be resent from the verification screen. Do not commit populated environment or Streamlit secret files.
+
 ## Testing
 
 ### Backend

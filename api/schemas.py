@@ -14,6 +14,26 @@ class SignupRequest(BaseModel):
     confirmation: str = Field(min_length=8, max_length=1024, repr=False)
 
 
+class SignupResponse(BaseModel):
+    authenticated: bool = False
+    email: EmailStr
+    message: str
+
+
+class EmailVerificationRequest(BaseModel):
+    email: EmailStr
+    otp: str = Field(pattern=r"^\d{6}$")
+
+
+class ResendEmailVerificationRequest(BaseModel):
+    email: EmailStr
+
+
+class EmailVerificationResponse(BaseModel):
+    verified: bool
+    message: str
+
+
 class LoginRequest(BaseModel):
     login: str = Field(min_length=1, max_length=254)
     password: str = Field(min_length=1, max_length=1024, repr=False)

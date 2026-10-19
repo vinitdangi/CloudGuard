@@ -39,7 +39,7 @@ def _authenticated_username(request: Request) -> str:
         user = AuthRepository.find_by_id(int(user_id)) if user_id is not None else None
     except (TypeError, ValueError):
         user = None
-    if user is None:
+    if user is None or not user.email_verified:
         request.session.clear()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

@@ -103,6 +103,7 @@ def initialize_database() -> None:
             username TEXT NOT NULL,
             email TEXT NOT NULL,
             password_hash TEXT NOT NULL,
+            email_verified BOOLEAN NOT NULL DEFAULT TRUE,
             created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP::text)
         )"""
         history_table = """CREATE TABLE IF NOT EXISTS scan_history (
@@ -130,6 +131,7 @@ def initialize_database() -> None:
             username TEXT NOT NULL COLLATE NOCASE UNIQUE,
             email TEXT NOT NULL COLLATE NOCASE UNIQUE,
             password_hash TEXT NOT NULL,
+            email_verified INTEGER NOT NULL DEFAULT 1,
             created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
         )"""
         history_table = """CREATE TABLE IF NOT EXISTS scan_history (
@@ -154,6 +156,33 @@ def initialize_database() -> None:
 
     with get_connection() as connection:
         connection.execute(user_table)
+        # Existing users are retained as verified during this additive migration.
+        if _postgresql_requested():
+            connection.execute(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS "
+                "email_verified BOOLEAN NOT NULL DEFAULT TRUE"
+            )
+            verification_table = """CREATE TABLE IF NOT EXISTS email_verifications (
+                email TEXT PRIMARY KEY,
+                otp_hash TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0
+            )"""
+        else:
+            columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(users)").fetchall()
+            }
+            if "email_verified" not in columns:
+                connection.execute(
+                    "ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 1"
+                )
+            verification_table = """CREATE TABLE IF NOT EXISTS email_verifications (
+                email TEXT PRIMARY KEY,
+                otp_hash TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0
+            )"""
+        connection.execute(verification_table)
         connection.execute(history_table)
         connection.execute(results_table)
         connection.execute(

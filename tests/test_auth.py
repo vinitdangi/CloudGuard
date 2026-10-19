@@ -2,13 +2,34 @@
 
 import pytest
 from fastapi import HTTPException
-from starlette.requests import Request
 
-from api.auth import current_user, login_user, signup_user
-from api.schemas import LoginRequest, SignupRequest
+from api.auth import (
+    current_user,
+    login_user,
+    resend_registration_otp,
+    signup_user,
+    verify_registration_email,
+)
+from api.schemas import (
+    EmailVerificationRequest,
+    LoginRequest,
+    ResendEmailVerificationRequest,
+    SignupRequest,
+)
 from auth.password import hash_password, verify_password
-from auth.service import AuthValidationError, DuplicateUserError, login, signup
+from auth.service import (
+    AuthValidationError,
+    DuplicateUserError,
+    EmailNotVerifiedError,
+    create_email_otp,
+    dashboard_login,
+    login,
+    signup,
+    signup_unverified,
+    verify_email_otp,
+)
 from auth.session import clear_session, establish_session
+from database.auth_repository import AuthRepository
 from database.db import initialize_database
 from database.models import User
 
@@ -58,18 +79,21 @@ def test_login_accepts_username_and_email():
     assert login("VINIT@example.com", "strongpass123").username == "vinit_1"
 
 
-def test_api_signup_then_login_with_same_email_and_password():
-    request = Request(
-        {
-            "type": "http",
-            "method": "POST",
-            "scheme": "https",
-            "path": "/api/auth/signup",
-            "headers": [],
-            "query_string": b"",
-            "session": {},
-        }
-    )
+def test_api_signup_requires_otp_before_login(monkeypatch):
+    import api.auth as auth_routes
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("CLOUDGUARD_OTP_SECRET", "test-only-secret-value-32-bytes-long")
+    monkeypatch.setattr(auth_routes, "send_verification_email", lambda *_args: None)
+    original_create_otp = auth_routes.create_email_otp
+    captured = {}
+
+    def capture_otp(email, **kwargs):
+        otp = original_create_otp(email, **kwargs)
+        captured["otp"] = otp
+        return otp
+
+    monkeypatch.setattr(auth_routes, "create_email_otp", capture_otp)
     signup_response = signup_user(
         SignupRequest(
             username="api_user",
@@ -77,34 +101,66 @@ def test_api_signup_then_login_with_same_email_and_password():
             password="StrongPass123!",
             confirmation="StrongPass123!",
         ),
-        request,
     )
+    assert signup_response.authenticated is False
+    assert signup_response.email == "same@example.com"
+    user = AuthRepository.find_by_login("same@example.com")
+    assert user.email_verified is False
 
+    with pytest.raises(HTTPException) as error:
+        login_user(LoginRequest(login="same@example.com", password="StrongPass123!"), {})
+    assert error.value.status_code == 403
+    assert error.value.detail == "Please verify your email before logging in."
+
+    verified = verify_registration_email(
+        EmailVerificationRequest(email="same@example.com", otp=captured["otp"])
+    )
+    assert verified.verified is True
+    assert AuthRepository.find_by_login("same@example.com").email_verified is True
+
+    request = SimpleNamespace(session={})
     login_response = login_user(
-        LoginRequest(login="same@example.com", password="StrongPass123!"),
-        request,
+        LoginRequest(login="same@example.com", password="StrongPass123!"), request
     )
 
-    assert login_response.id == signup_response.id
+    assert login_response.id == user.id
     assert login_response.username == "api_user"
-    assert request.session["user_id"] == signup_response.id
+    assert request.session["user_id"] == user.id
     assert current_user(request).email == "same@example.com"
+
+
+def test_api_resend_replaces_the_old_code(monkeypatch):
+    import secrets
+    import api.auth as auth_routes
+
+    monkeypatch.setenv("CLOUDGUARD_OTP_SECRET", "test-only-secret-value-32-bytes-long")
+    codes = iter((111111, 222222))
+    monkeypatch.setattr(secrets, "randbelow", lambda _limit: next(codes))
+    user = signup_unverified(
+        "resend_api", "resend-api@example.com", "StrongPass123!", "StrongPass123!"
+    )
+    secret = "test-only-secret-value-32-bytes-long"
+    old_code = create_email_otp(user.email, secret=secret)
+    captured = {}
+    original_create_otp = auth_routes.create_email_otp
+
+    def capture_otp(email, **kwargs):
+        otp = original_create_otp(email, **kwargs)
+        captured["otp"] = otp
+        return otp
+
+    monkeypatch.setattr(auth_routes, "create_email_otp", capture_otp)
+    monkeypatch.setattr(auth_routes, "send_verification_email", lambda *_args: None)
+    response = resend_registration_otp(
+        ResendEmailVerificationRequest(email=user.email)
+    )
+    assert response.verified is False
+    assert verify_email_otp(user.email, old_code, secret=secret) == "invalid"
+    assert verify_email_otp(user.email, captured["otp"], secret=secret) == "verified"
 
 
 def test_api_duplicate_signup_with_same_email_is_rejected():
     signup("first_user", "same@example.com", "StrongPass123!", "StrongPass123!")
-    request = Request(
-        {
-            "type": "http",
-            "method": "POST",
-            "scheme": "https",
-            "path": "/api/auth/signup",
-            "headers": [],
-            "query_string": b"",
-            "session": {},
-        }
-    )
-
     with pytest.raises(HTTPException) as error:
         signup_user(
             SignupRequest(
@@ -113,7 +169,6 @@ def test_api_duplicate_signup_with_same_email_is_rejected():
                 password="StrongPass123!",
                 confirmation="StrongPass123!",
             ),
-            request,
         )
     assert error.value.status_code == 409
 
@@ -155,3 +210,65 @@ def test_user_data_remains_after_database_reinitialization():
     signup("vinit_1", "vinit@example.com", "strongpass123", "strongpass123")
     initialize_database()
     assert login("vinit_1", "strongpass123") is not None
+
+
+def test_streamlit_registration_requires_email_verification(monkeypatch):
+    import secrets
+
+    monkeypatch.setattr(secrets, "randbelow", lambda _limit: 123456)
+    user = signup_unverified(
+        "pending_user", "PENDING@example.com", "strongpass123", "strongpass123"
+    )
+    assert user.email_verified is False
+    assert login("pending_user", "strongpass123") is None
+    with pytest.raises(EmailNotVerifiedError):
+        dashboard_login("PENDING@example.com", "strongpass123")
+
+    otp = create_email_otp(user.email, secret="test-only-secret-value-32-bytes-long")
+    assert otp == "123456"
+    record = AuthRepository.get_email_verification(user.email)
+    assert record["otp_hash"] != otp
+    assert verify_email_otp(
+        user.email, otp, secret="test-only-secret-value-32-bytes-long"
+    ) == "verified"
+    assert login("pending_user", "strongpass123").email_verified is True
+
+
+def test_email_verification_rejects_wrong_expired_and_reused_codes(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    import secrets
+
+    monkeypatch.setattr(secrets, "randbelow", lambda _limit: 42)
+    user = signup_unverified(
+        "otp_user", "otp@example.com", "strongpass123", "strongpass123"
+    )
+    now = datetime.now(timezone.utc)
+    secret = "test-only-secret-value-32-bytes-long"
+    otp = create_email_otp(user.email, secret=secret, now=now)
+    assert verify_email_otp(user.email, "000000", secret=secret, now=now) == "invalid"
+    assert verify_email_otp(
+        user.email,
+        otp,
+        secret=secret,
+        now=now + timedelta(minutes=6),
+    ) == "expired"
+    assert verify_email_otp(user.email, otp, secret=secret, now=now) == "missing"
+
+    replacement = create_email_otp(user.email, secret=secret, now=now)
+    assert verify_email_otp(user.email, replacement, secret=secret, now=now) == "verified"
+    assert verify_email_otp(user.email, replacement, secret=secret, now=now) == "missing"
+
+
+def test_resending_code_replaces_previous_code(monkeypatch):
+    import secrets
+
+    values = iter((111111, 222222))
+    monkeypatch.setattr(secrets, "randbelow", lambda _limit: next(values))
+    user = signup_unverified(
+        "resend_user", "resend@example.com", "strongpass123", "strongpass123"
+    )
+    secret = "test-only-secret-value-32-bytes-long"
+    old_otp = create_email_otp(user.email, secret=secret)
+    new_otp = create_email_otp(user.email, secret=secret)
+    assert verify_email_otp(user.email, old_otp, secret=secret) == "invalid"
+    assert verify_email_otp(user.email, new_otp, secret=secret) == "verified"

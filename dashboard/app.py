@@ -6,7 +6,16 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
-from auth.service import AuthValidationError, DuplicateUserError, login, signup
+from auth.email_delivery import send_verification_email, setting
+from auth.service import (
+    AuthValidationError,
+    DuplicateUserError,
+    EmailNotVerifiedError,
+    create_email_otp,
+    dashboard_login,
+    signup_unverified,
+    verify_email_otp,
+)
 from auth.session import clear_session, establish_session
 from cloudguard.aws.configuration import (
     AUTH_METHOD_ACCESS_KEY,
@@ -166,9 +175,15 @@ def render_authentication() -> None:
     )
     _, panel, _ = st.columns([1, 1.15, 1])
     with panel:
+        options = ["Login", "Sign Up"]
+        pending_email = st.session_state.get("pending_verification_email")
+        if pending_email:
+            options.append("Verify Email")
+        if st.session_state.get("auth_mode") not in options:
+            st.session_state["auth_mode"] = "Login"
         mode = st.radio(
             "Account access",
-            ["Login", "Sign Up"],
+            options,
             horizontal=True,
             label_visibility="collapsed",
             key="auth_mode",
@@ -180,7 +195,9 @@ def render_authentication() -> None:
                 submitted = st.form_submit_button("LOGIN", type="primary", use_container_width=True)
             if submitted:
                 try:
-                    user = login(login_value, password)
+                    user = dashboard_login(login_value, password)
+                except EmailNotVerifiedError:
+                    st.error("Please verify your email before logging in.")
                 except Exception:
                     st.error("Unable to sign in right now. Please try again.")
                 else:
@@ -190,8 +207,8 @@ def render_authentication() -> None:
                         establish_session(st.session_state, user)
                         st.rerun()
             if st.session_state.pop("signup_success", False):
-                st.success("Account created successfully. Please log in.")
-        else:
+                st.success("Email verified. You can now log in.")
+        elif mode == "Sign Up":
             with st.form("signup_form"):
                 username = st.text_input("Username")
                 email = st.text_input("Email")
@@ -200,7 +217,7 @@ def render_authentication() -> None:
                 submitted = st.form_submit_button("CREATE ACCOUNT", type="primary", use_container_width=True)
             if submitted:
                 try:
-                    signup(username, email, password, confirmation)
+                    user = signup_unverified(username, email, password, confirmation)
                 except AuthValidationError as exc:
                     st.error(str(exc))
                 except DuplicateUserError:
@@ -208,9 +225,65 @@ def render_authentication() -> None:
                 except Exception:
                     st.error("Unable to create your account right now. Please try again.")
                 else:
-                    st.session_state["signup_success"] = True
-                    st.session_state["switch_to_login"] = True
+                    st.session_state["pending_verification_email"] = user.email
+                    st.session_state["auth_mode"] = "Verify Email"
+                    try:
+                        otp = create_email_otp(
+                            user.email, secret=setting("CLOUDGUARD_OTP_SECRET")
+                        )
+                        send_verification_email(user.email, otp)
+                    except Exception:
+                        st.session_state["otp_delivery_pending"] = True
+                    else:
+                        st.session_state["otp_delivery_pending"] = False
                     st.rerun()
+        else:
+            st.info(f"Enter the 6-digit code sent to {pending_email}.")
+            if st.session_state.pop("otp_delivery_pending", False):
+                st.warning(
+                    "We couldn't send the verification email. Check the email settings "
+                    "and use Resend OTP."
+                )
+            with st.form("verify_email_form"):
+                otp = st.text_input("6-digit verification code", max_chars=6)
+                submitted = st.form_submit_button(
+                    "VERIFY EMAIL", type="primary", use_container_width=True
+                )
+            if submitted:
+                if len(otp) != 6 or not otp.isdigit():
+                    st.error("Enter the 6-digit code from your email.")
+                else:
+                    try:
+                        result = verify_email_otp(
+                            pending_email,
+                            otp,
+                            secret=setting("CLOUDGUARD_OTP_SECRET"),
+                        )
+                    except Exception:
+                        st.error("Unable to verify your email right now. Please try again.")
+                    else:
+                        messages = {
+                            "invalid": "That verification code is incorrect. Try again.",
+                            "expired": "That verification code expired. Request a new one.",
+                            "too_many_attempts": "Too many incorrect attempts. Request a new code.",
+                            "missing": "No active verification code. Request a new one.",
+                        }
+                        if result == "verified":
+                            st.session_state.pop("pending_verification_email", None)
+                            st.session_state["auth_mode"] = "Login"
+                            st.session_state["signup_success"] = True
+                            st.rerun()
+                        st.error(messages.get(result, "Unable to verify this code."))
+            if st.button("Resend OTP", use_container_width=True):
+                try:
+                    otp = create_email_otp(
+                        pending_email, secret=setting("CLOUDGUARD_OTP_SECRET")
+                    )
+                    send_verification_email(pending_email, otp)
+                except Exception:
+                    st.error("Unable to send a new verification code. Check email settings.")
+                else:
+                    st.success("A new verification code has been sent.")
 
 
 if not (st.session_state.get("authenticated") and st.session_state.get("user_id")):
