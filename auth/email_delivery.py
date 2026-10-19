@@ -2,7 +2,9 @@
 
 from email.message import EmailMessage
 import json
+import logging
 import os
+import re
 import smtplib
 import ssl
 from urllib.error import HTTPError, URLError
@@ -11,10 +13,34 @@ from urllib.request import Request, urlopen
 
 RESEND_EMAIL_API = "https://api.resend.com/emails"
 EMAIL_REQUEST_TIMEOUT_SECONDS = 10
+logger = logging.getLogger(__name__)
 
 
 class EmailDeliveryError(RuntimeError):
     """Provider-neutral failure that does not expose secrets or provider responses."""
+
+
+def _safe_detail(value: str, api_key: str) -> str:
+    """Remove credentials and OTP-like values before putting provider details in logs."""
+    detail = value[:1000]
+    if api_key:
+        detail = detail.replace(api_key, "[REDACTED]")
+    detail = re.sub(
+        r'(?i)("?(?:authorization|api[_ -]?key|token|password|secret)"?\s*[:=]\s*)"?[^,\s}\"]+"?',
+        r"\1[REDACTED]",
+        detail,
+    )
+    detail = re.sub(
+        r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
+        "[REDACTED_EMAIL]",
+        detail,
+    )
+    detail = re.sub(r"\b\d{6}\b", "[REDACTED_OTP]", detail)
+    return detail
+
+
+def _log_provider_event(level: int, event: str, **fields: object) -> None:
+    logger.log(level, json.dumps({"event": event, **fields}, sort_keys=True))
 
 
 def setting(name: str, default: str = "") -> str:
@@ -90,14 +116,40 @@ def _send_with_resend(email: str, otp: str, sender: str) -> None:
     try:
         with urlopen(request, timeout=EMAIL_REQUEST_TIMEOUT_SECONDS) as response:
             status = response.getcode()
+            _log_provider_event(
+                logging.INFO,
+                "verification_email_provider_response",
+                provider="resend",
+                http_status=status,
+                sender=sender,
+            )
             if status < 200 or status >= 300:
                 raise EmailDeliveryError("Email provider rejected the verification email.")
     except EmailDeliveryError:
         raise
     except HTTPError as exc:
+        try:
+            response_body = exc.read(1000).decode("utf-8", errors="replace")
+        except Exception:
+            response_body = ""
+        _log_provider_event(
+            logging.WARNING,
+            "verification_email_provider_response",
+            provider="resend",
+            http_status=exc.code,
+            sender=sender,
+            error=_safe_detail(response_body, api_key),
+        )
         exc.close()
         raise EmailDeliveryError("Email provider rejected the verification email.") from None
-    except (URLError, TimeoutError, OSError, ValueError):
+    except (URLError, TimeoutError, OSError, ValueError) as exc:
+        _log_provider_event(
+            logging.WARNING,
+            "verification_email_provider_failure",
+            provider="resend",
+            sender=sender,
+            error=_safe_detail(str(exc), api_key),
+        )
         raise EmailDeliveryError("Email provider request failed.") from None
 
 
@@ -141,10 +193,48 @@ def _send_with_smtp(email: str, otp: str, sender: str) -> None:
 def send_verification_email(email: str, otp: str) -> None:
     """Send a verification code without logging or persisting its plaintext."""
     sender = setting("CLOUDGUARD_EMAIL_FROM")
-    if not sender:
-        raise EmailDeliveryError("Email sender configuration is missing.")
-    provider = _provider()
-    if provider == "resend":
-        _send_with_resend(email, otp, sender)
-    else:
-        _send_with_smtp(email, otp, sender)
+    api_key_configured = bool(setting("CLOUDGUARD_EMAIL_API_KEY"))
+    try:
+        provider = _provider()
+    except EmailDeliveryError as exc:
+        _log_provider_event(
+            logging.WARNING,
+            "verification_email_provider_configuration_failure",
+            provider=setting("CLOUDGUARD_EMAIL_PROVIDER", "auto") or "auto",
+            api_key_configured=api_key_configured,
+            sender=sender or None,
+            error=_safe_detail(str(exc), setting("CLOUDGUARD_EMAIL_API_KEY")),
+        )
+        raise
+
+    _log_provider_event(
+        logging.INFO,
+        "verification_email_provider_selected",
+        provider=provider,
+        api_key_configured=api_key_configured,
+        sender=sender or None,
+    )
+    try:
+        if not sender:
+            raise EmailDeliveryError("Email sender configuration is missing.")
+        if provider == "resend":
+            _send_with_resend(email, otp, sender)
+        else:
+            _send_with_smtp(email, otp, sender)
+    except EmailDeliveryError as exc:
+        _log_provider_event(
+            logging.WARNING,
+            "verification_email_delivery_failure",
+            provider=provider,
+            api_key_configured=api_key_configured,
+            sender=sender or None,
+            error=_safe_detail(str(exc), setting("CLOUDGUARD_EMAIL_API_KEY")),
+        )
+        raise
+    _log_provider_event(
+        logging.INFO,
+        "verification_email_delivery_accepted",
+        provider=provider,
+        api_key_configured=api_key_configured,
+        sender=sender,
+    )

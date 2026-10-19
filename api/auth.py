@@ -1,5 +1,8 @@
 """Authentication API routes for CloudGuard."""
 
+import json
+import logging
+
 from fastapi import APIRouter, HTTPException, Request, status
 
 from auth.service import (
@@ -25,6 +28,7 @@ from api.schemas import (
 
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
+logger = logging.getLogger(__name__)
 
 
 def _authenticated_user(request: Request):
@@ -122,10 +126,21 @@ def resend_registration_otp(payload: ResendEmailVerificationRequest) -> EmailVer
         try:
             otp = create_email_otp(user.email, secret=setting("CLOUDGUARD_OTP_SECRET"))
             send_verification_email(user.email, otp)
-        except Exception:
+        except Exception as exc:
             # Keep the response indistinguishable for missing, verified, and
             # pending accounts; another request can replace a code after setup is fixed.
-            pass
+            logger.warning(
+                json.dumps(
+                    {
+                        "event": "verification_code_resend_failed",
+                        "provider": setting("CLOUDGUARD_EMAIL_PROVIDER", "resend") or "resend",
+                        "api_key_configured": bool(setting("CLOUDGUARD_EMAIL_API_KEY")),
+                        "sender": setting("CLOUDGUARD_EMAIL_FROM") or None,
+                        "error": type(exc).__name__,
+                    },
+                    sort_keys=True,
+                )
+            )
     return EmailVerificationResponse(
         verified=False,
         message="If an unverified account matches, a verification code has been sent. Check your email.",

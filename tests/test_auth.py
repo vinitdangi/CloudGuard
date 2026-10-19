@@ -187,6 +187,36 @@ def test_resend_does_not_reveal_or_send_for_missing_or_verified_accounts(monkeyp
     assert AuthRepository.find_by_login(pending_user.username).email_verified is False
 
 
+def test_resend_delivery_failure_is_logged_without_changing_generic_response(
+    monkeypatch, caplog
+):
+    import api.auth as auth_routes
+
+    user = signup_unverified(
+        "delivery_failure", "delivery-failure@example.com", "StrongPass123!", "StrongPass123!"
+    )
+    monkeypatch.setenv("CLOUDGUARD_EMAIL_PROVIDER", "resend")
+    monkeypatch.setenv("CLOUDGUARD_EMAIL_API_KEY", "never-log-this-api-key")
+    monkeypatch.setenv("CLOUDGUARD_EMAIL_FROM", "cloudguard@example.test")
+    monkeypatch.setenv("CLOUDGUARD_OTP_SECRET", "test-only-secret-value-32-bytes-long")
+    monkeypatch.setattr(
+        auth_routes,
+        "send_verification_email",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("provider failed")),
+    )
+
+    response = resend_registration_otp(
+        ResendEmailVerificationRequest(identifier=user.username)
+    )
+
+    assert "If an unverified account matches" in response.message
+    assert "verification_code_resend_failed" in caplog.text
+    assert '"api_key_configured": true' in caplog.text
+    assert '"sender": "cloudguard@example.test"' in caplog.text
+    assert "never-log-this-api-key" not in caplog.text
+    assert "provider failed" not in caplog.text
+
+
 def test_api_duplicate_signup_with_same_email_is_rejected():
     signup("first_user", "same@example.com", "StrongPass123!", "StrongPass123!")
     with pytest.raises(HTTPException) as error:

@@ -91,7 +91,7 @@ def test_resend_sends_https_request_with_expected_auth_and_payload(monkeypatch):
     assert "001234" in payload["text"]
 
 
-def test_resend_non_2xx_response_raises_sanitized_error(monkeypatch):
+def test_resend_non_2xx_response_raises_sanitized_error(monkeypatch, caplog):
     def fake_urlopen(_request, **_kwargs):
         raise HTTPError(
             email_delivery.RESEND_EMAIL_API,
@@ -110,6 +110,10 @@ def test_resend_non_2xx_response_raises_sanitized_error(monkeypatch):
         send_verification_email("person@example.test", "001234")
     assert "re_test_secret" not in str(error.value)
     assert "invalid key" not in str(error.value)
+    assert "re_test_secret" not in caplog.text
+    assert '"api_key_configured": true' in caplog.text
+    assert '"http_status": 401' in caplog.text
+    assert '"sender": "cloudguard@example.test"' in caplog.text
 
 
 def test_production_requires_resend_and_api_key(monkeypatch):
