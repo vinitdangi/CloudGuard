@@ -89,8 +89,14 @@ def signup_user(payload: SignupRequest) -> SignupResponse:
 @router.post("/verify-email", response_model=EmailVerificationResponse)
 def verify_registration_email(payload: EmailVerificationRequest) -> EmailVerificationResponse:
     """Verify and consume the one-time registration code."""
-    result = verify_email_otp(
-        str(payload.email), payload.otp, secret=setting("CLOUDGUARD_OTP_SECRET")
+    identifier = payload.identifier or str(payload.email)
+    user = AuthRepository.find_by_login(identifier)
+    result = (
+        verify_email_otp(
+            user.email, payload.otp, secret=setting("CLOUDGUARD_OTP_SECRET")
+        )
+        if user is not None
+        else "missing"
     )
     messages = {
         "verified": "Email verified. You can now sign in.",
@@ -109,22 +115,21 @@ def verify_registration_email(payload: EmailVerificationRequest) -> EmailVerific
 
 @router.post("/resend-otp", response_model=EmailVerificationResponse)
 def resend_registration_otp(payload: ResendEmailVerificationRequest) -> EmailVerificationResponse:
-    """Replace the pending code with a newly generated verification OTP."""
-    user = AuthRepository.find_by_login(str(payload.email))
-    if user is None or user.email_verified:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No pending email verification was found.",
-        )
-    try:
-        otp = create_email_otp(user.email, secret=setting("CLOUDGUARD_OTP_SECRET"))
-        send_verification_email(user.email, otp)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Unable to send a new verification code. Check email configuration.",
-        ) from exc
-    return EmailVerificationResponse(verified=False, message="A new verification code was sent.")
+    """Send a replacement code without disclosing whether an account matches."""
+    identifier = payload.identifier or str(payload.email)
+    user = AuthRepository.find_by_login(identifier)
+    if user is not None and not user.email_verified:
+        try:
+            otp = create_email_otp(user.email, secret=setting("CLOUDGUARD_OTP_SECRET"))
+            send_verification_email(user.email, otp)
+        except Exception:
+            # Keep the response indistinguishable for missing, verified, and
+            # pending accounts; another request can replace a code after setup is fixed.
+            pass
+    return EmailVerificationResponse(
+        verified=False,
+        message="If an unverified account matches, a verification code has been sent. Check your email.",
+    )
 
 
 @router.post("/login", response_model=UserResponse)

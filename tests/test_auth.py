@@ -113,7 +113,7 @@ def test_api_signup_requires_otp_before_login(monkeypatch):
     assert error.value.detail == "Please verify your email before logging in."
 
     verified = verify_registration_email(
-        EmailVerificationRequest(email="same@example.com", otp=captured["otp"])
+        EmailVerificationRequest(identifier="api_user", otp=captured["otp"])
     )
     assert verified.verified is True
     assert AuthRepository.find_by_login("same@example.com").email_verified is True
@@ -150,13 +150,41 @@ def test_api_resend_replaces_the_old_code(monkeypatch):
         return otp
 
     monkeypatch.setattr(auth_routes, "create_email_otp", capture_otp)
-    monkeypatch.setattr(auth_routes, "send_verification_email", lambda *_args: None)
+    sent = []
+    monkeypatch.setattr(auth_routes, "send_verification_email", lambda *args: sent.append(args))
     response = resend_registration_otp(
-        ResendEmailVerificationRequest(email=user.email)
+        ResendEmailVerificationRequest(identifier=user.username)
     )
     assert response.verified is False
+    assert "verification code has been sent" in response.message
+    assert sent == [(user.email, captured["otp"])]
     assert verify_email_otp(user.email, old_code, secret=secret) == "invalid"
     assert verify_email_otp(user.email, captured["otp"], secret=secret) == "verified"
+
+
+def test_resend_does_not_reveal_or_send_for_missing_or_verified_accounts(monkeypatch):
+    import api.auth as auth_routes
+
+    verified_user = signup(
+        "verified_user", "verified@example.com", "StrongPass123!", "StrongPass123!"
+    )
+    pending_user = signup_unverified(
+        "pending_user", "pending@example.com", "StrongPass123!", "StrongPass123!"
+    )
+    sent = []
+    monkeypatch.setenv("CLOUDGUARD_OTP_SECRET", "test-only-secret-value-32-bytes-long")
+    monkeypatch.setattr(auth_routes, "send_verification_email", lambda *args: sent.append(args))
+
+    unknown_response = resend_registration_otp(
+        ResendEmailVerificationRequest(identifier="no-such-user")
+    )
+    verified_response = resend_registration_otp(
+        ResendEmailVerificationRequest(email=verified_user.email)
+    )
+
+    assert unknown_response.model_dump() == verified_response.model_dump()
+    assert not sent
+    assert AuthRepository.find_by_login(pending_user.username).email_verified is False
 
 
 def test_api_duplicate_signup_with_same_email_is_rejected():

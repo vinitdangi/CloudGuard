@@ -1,9 +1,20 @@
-"""SMTP delivery for CloudGuard registration verification codes."""
+"""Email delivery for CloudGuard registration verification codes."""
 
 from email.message import EmailMessage
+import json
 import os
 import smtplib
 import ssl
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
+
+RESEND_EMAIL_API = "https://api.resend.com/emails"
+EMAIL_REQUEST_TIMEOUT_SECONDS = 10
+
+
+class EmailDeliveryError(RuntimeError):
+    """Provider-neutral failure that does not expose secrets or provider responses."""
 
 
 def setting(name: str, default: str = "") -> str:
@@ -19,18 +30,87 @@ def setting(name: str, default: str = "") -> str:
         return default
 
 
-def send_verification_email(email: str, otp: str) -> None:
-    """Send a registration code without logging or persisting the plaintext OTP."""
+def _is_production() -> bool:
+    environment = setting("CLOUDGUARD_ENVIRONMENT").strip().lower()
+    return bool(
+        os.getenv("RAILWAY_ENVIRONMENT")
+        or os.getenv("RAILWAY_PROJECT_ID")
+        or environment in {"prod", "production"}
+    )
+
+
+def _provider() -> str:
+    configured = setting("CLOUDGUARD_EMAIL_PROVIDER").strip().lower()
+    if _is_production():
+        if configured and configured != "resend":
+            raise EmailDeliveryError("Production email delivery must use Resend.")
+        return "resend"
+    if configured:
+        if configured not in {"resend", "smtp"}:
+            raise EmailDeliveryError("Unsupported email provider configuration.")
+        return configured
+    # Keep existing local Gmail SMTP setups working. If an API key is present,
+    # Resend is selected automatically; production always selects Resend above.
+    if setting("CLOUDGUARD_EMAIL_API_KEY"):
+        return "resend"
+    smtp_settings = (
+        "CLOUDGUARD_SMTP_HOST",
+        "CLOUDGUARD_SMTP_USERNAME",
+        "CLOUDGUARD_SMTP_PASSWORD",
+    )
+    return "smtp" if all(setting(name) for name in smtp_settings) else "resend"
+
+
+def _send_with_resend(email: str, otp: str, sender: str) -> None:
+    api_key = setting("CLOUDGUARD_EMAIL_API_KEY")
+    if not api_key:
+        raise EmailDeliveryError("Email delivery is not configured.")
+
+    payload = json.dumps(
+        {
+            "from": sender,
+            "to": [email],
+            "subject": "Verify your CloudGuard email",
+            "text": (
+                f"Your CloudGuard email verification code is {otp}. "
+                "It expires in 5 minutes. Do not share this code."
+            ),
+        }
+    ).encode("utf-8")
+    request = Request(
+        RESEND_EMAIL_API,
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=EMAIL_REQUEST_TIMEOUT_SECONDS) as response:
+            status = response.getcode()
+            if status < 200 or status >= 300:
+                raise EmailDeliveryError("Email provider rejected the verification email.")
+    except EmailDeliveryError:
+        raise
+    except HTTPError as exc:
+        exc.close()
+        raise EmailDeliveryError("Email provider rejected the verification email.") from None
+    except (URLError, TimeoutError, OSError, ValueError):
+        raise EmailDeliveryError("Email provider request failed.") from None
+
+
+def _send_with_smtp(email: str, otp: str, sender: str) -> None:
     host = setting("CLOUDGUARD_SMTP_HOST")
     username = setting("CLOUDGUARD_SMTP_USERNAME")
     password = setting("CLOUDGUARD_SMTP_PASSWORD")
-    sender = setting("CLOUDGUARD_EMAIL_FROM", username)
     try:
         port = int(setting("CLOUDGUARD_SMTP_PORT", "587"))
-    except ValueError as exc:
-        raise ValueError("CLOUDGUARD_SMTP_PORT must be a valid port number.") from exc
+    except ValueError:
+        raise EmailDeliveryError("SMTP email configuration is invalid.") from None
     if not all((host, username, password, sender)):
-        raise ValueError("SMTP email settings are incomplete.")
+        raise EmailDeliveryError("Email delivery is not configured.")
 
     message = EmailMessage()
     message["Subject"] = "Verify your CloudGuard email"
@@ -42,14 +122,29 @@ def send_verification_email(email: str, otp: str) -> None:
     )
 
     context = ssl.create_default_context()
-    if port == 465:
-        with smtplib.SMTP_SSL(host, port, timeout=15, context=context) as server:
-            server.login(username, password)
-            server.send_message(message)
+    try:
+        if port == 465:
+            with smtplib.SMTP_SSL(host, port, timeout=15, context=context) as server:
+                server.login(username, password)
+                server.send_message(message)
+        else:
+            with smtplib.SMTP(host, port, timeout=15) as server:
+                server.ehlo()
+                server.starttls(context=context)
+                server.ehlo()
+                server.login(username, password)
+                server.send_message(message)
+    except Exception:
+        raise EmailDeliveryError("SMTP email delivery failed.") from None
+
+
+def send_verification_email(email: str, otp: str) -> None:
+    """Send a verification code without logging or persisting its plaintext."""
+    sender = setting("CLOUDGUARD_EMAIL_FROM")
+    if not sender:
+        raise EmailDeliveryError("Email sender configuration is missing.")
+    provider = _provider()
+    if provider == "resend":
+        _send_with_resend(email, otp, sender)
     else:
-        with smtplib.SMTP(host, port, timeout=15) as server:
-            server.ehlo()
-            server.starttls(context=context)
-            server.ehlo()
-            server.login(username, password)
-            server.send_message(message)
+        _send_with_smtp(email, otp, sender)

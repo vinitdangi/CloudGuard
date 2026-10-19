@@ -21,12 +21,26 @@ class SignupResponse(BaseModel):
 
 
 class EmailVerificationRequest(BaseModel):
-    email: EmailStr
+    email: EmailStr | None = None
+    identifier: str | None = Field(default=None, min_length=1, max_length=254)
     otp: str = Field(pattern=r"^\d{6}$")
+
+    @model_validator(mode="after")
+    def require_email_or_identifier(self):
+        if (self.email is None) == (self.identifier is None):
+            raise ValueError("Provide exactly one email or username.")
+        return self
 
 
 class ResendEmailVerificationRequest(BaseModel):
-    email: EmailStr
+    email: EmailStr | None = None
+    identifier: str | None = Field(default=None, min_length=1, max_length=254)
+
+    @model_validator(mode="after")
+    def require_email_or_identifier(self):
+        if (self.email is None) == (self.identifier is None):
+            raise ValueError("Provide exactly one email or username.")
+        return self
 
 
 class EmailVerificationResponse(BaseModel):
