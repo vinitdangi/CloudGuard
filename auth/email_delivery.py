@@ -11,7 +11,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-RESEND_EMAIL_API = "https://api.resend.com/emails"
+BREVO_EMAIL_API = "https://api.brevo.com/v3/smtp/email"
 EMAIL_REQUEST_TIMEOUT_SECONDS = 10
 logger = logging.getLogger(__name__)
 
@@ -68,46 +68,47 @@ def _is_production() -> bool:
 def _provider() -> str:
     configured = setting("CLOUDGUARD_EMAIL_PROVIDER").strip().lower()
     if _is_production():
-        if configured and configured != "resend":
-            raise EmailDeliveryError("Production email delivery must use Resend.")
-        return "resend"
+        if configured and configured != "brevo":
+            raise EmailDeliveryError("Production email delivery must use Brevo.")
+        return "brevo"
     if configured:
-        if configured not in {"resend", "smtp"}:
+        if configured not in {"brevo", "smtp"}:
             raise EmailDeliveryError("Unsupported email provider configuration.")
         return configured
     # Keep existing local Gmail SMTP setups working. If an API key is present,
-    # Resend is selected automatically; production always selects Resend above.
-    if setting("CLOUDGUARD_EMAIL_API_KEY"):
-        return "resend"
+    # Brevo is selected automatically; production always selects Brevo above.
+    if os.getenv("CLOUDGUARD_EMAIL_API_KEY", "").strip():
+        return "brevo"
     smtp_settings = (
         "CLOUDGUARD_SMTP_HOST",
         "CLOUDGUARD_SMTP_USERNAME",
         "CLOUDGUARD_SMTP_PASSWORD",
     )
-    return "smtp" if all(setting(name) for name in smtp_settings) else "resend"
+    return "smtp" if all(setting(name) for name in smtp_settings) else "brevo"
 
 
-def _send_with_resend(email: str, otp: str, sender: str) -> None:
-    api_key = setting("CLOUDGUARD_EMAIL_API_KEY")
+def _send_with_brevo(email: str, otp: str, sender: str) -> None:
+    # Provider API keys are deployment environment variables, never Streamlit state.
+    api_key = os.getenv("CLOUDGUARD_EMAIL_API_KEY", "").strip()
     if not api_key:
         raise EmailDeliveryError("Email delivery is not configured.")
 
     payload = json.dumps(
         {
-            "from": sender,
-            "to": [email],
+            "sender": {"email": sender},
+            "to": [{"email": email}],
             "subject": "Verify your CloudGuard email",
-            "text": (
+            "textContent": (
                 f"Your CloudGuard email verification code is {otp}. "
                 "It expires in 5 minutes. Do not share this code."
             ),
         }
     ).encode("utf-8")
     request = Request(
-        RESEND_EMAIL_API,
+        BREVO_EMAIL_API,
         data=payload,
         headers={
-            "Authorization": f"Bearer {api_key}",
+            "api-key": api_key,
             "Content-Type": "application/json",
             "Accept": "application/json",
         },
@@ -119,7 +120,7 @@ def _send_with_resend(email: str, otp: str, sender: str) -> None:
             _log_provider_event(
                 logging.INFO,
                 "verification_email_provider_response",
-                provider="resend",
+                provider="brevo",
                 http_status=status,
                 sender=sender,
             )
@@ -135,7 +136,7 @@ def _send_with_resend(email: str, otp: str, sender: str) -> None:
         _log_provider_event(
             logging.WARNING,
             "verification_email_provider_response",
-            provider="resend",
+            provider="brevo",
             http_status=exc.code,
             sender=sender,
             error=_safe_detail(response_body, api_key),
@@ -146,7 +147,7 @@ def _send_with_resend(email: str, otp: str, sender: str) -> None:
         _log_provider_event(
             logging.WARNING,
             "verification_email_provider_failure",
-            provider="resend",
+            provider="brevo",
             sender=sender,
             error=_safe_detail(str(exc), api_key),
         )
@@ -193,7 +194,8 @@ def _send_with_smtp(email: str, otp: str, sender: str) -> None:
 def send_verification_email(email: str, otp: str) -> None:
     """Send a verification code without logging or persisting its plaintext."""
     sender = setting("CLOUDGUARD_EMAIL_FROM")
-    api_key_configured = bool(setting("CLOUDGUARD_EMAIL_API_KEY"))
+    api_key = os.getenv("CLOUDGUARD_EMAIL_API_KEY", "").strip()
+    api_key_configured = bool(api_key)
     try:
         provider = _provider()
     except EmailDeliveryError as exc:
@@ -203,7 +205,7 @@ def send_verification_email(email: str, otp: str) -> None:
             provider=setting("CLOUDGUARD_EMAIL_PROVIDER", "auto") or "auto",
             api_key_configured=api_key_configured,
             sender=sender or None,
-            error=_safe_detail(str(exc), setting("CLOUDGUARD_EMAIL_API_KEY")),
+            error=_safe_detail(str(exc), api_key),
         )
         raise
 
@@ -217,8 +219,8 @@ def send_verification_email(email: str, otp: str) -> None:
     try:
         if not sender:
             raise EmailDeliveryError("Email sender configuration is missing.")
-        if provider == "resend":
-            _send_with_resend(email, otp, sender)
+        if provider == "brevo":
+            _send_with_brevo(email, otp, sender)
         else:
             _send_with_smtp(email, otp, sender)
     except EmailDeliveryError as exc:
@@ -228,7 +230,7 @@ def send_verification_email(email: str, otp: str) -> None:
             provider=provider,
             api_key_configured=api_key_configured,
             sender=sender or None,
-            error=_safe_detail(str(exc), setting("CLOUDGUARD_EMAIL_API_KEY")),
+            error=_safe_detail(str(exc), api_key),
         )
         raise
     _log_provider_event(

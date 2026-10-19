@@ -184,16 +184,16 @@ streamlit run dashboard/app.py
 
 These local tools are separate from the production Next.js web application.
 
-Sign-up verifies the supplied email before allowing the new account to log in. Production on Railway uses Resend's HTTPS Email API. Configure these environment variables in Railway (and use the same variables for any hosted Streamlit deployment):
+Sign-up verifies the supplied email before allowing the new account to log in. Production on Railway uses Brevo's transactional email HTTPS API. Configure these environment variables in Railway (and use the same variables for any hosted Streamlit deployment):
 
 ```text
 CLOUDGUARD_OTP_SECRET=<random secret of at least 32 characters>
-CLOUDGUARD_EMAIL_PROVIDER=resend
-CLOUDGUARD_EMAIL_API_KEY=<Resend API key>
+CLOUDGUARD_EMAIL_PROVIDER=brevo
+CLOUDGUARD_EMAIL_API_KEY=<Brevo API key>
 CLOUDGUARD_EMAIL_FROM=<verified sender address>
 ```
 
-For local development, SMTP remains available by setting `CLOUDGUARD_EMAIL_PROVIDER=smtp`, `CLOUDGUARD_SMTP_HOST`, `CLOUDGUARD_SMTP_PORT`, `CLOUDGUARD_SMTP_USERNAME`, and `CLOUDGUARD_SMTP_PASSWORD`; ports 587 and 465 use STARTTLS and implicit TLS respectively. If no provider is specified locally, configured SMTP settings are used when no Resend key is present. OTP codes expire after five minutes, are stored only as keyed digests, and can be resent from the verification screen. Provider requests use HTTPS with a bounded timeout, and provider failures do not expose API keys. Do not commit populated environment or Streamlit secret files.
+For local development, SMTP remains available by setting `CLOUDGUARD_EMAIL_PROVIDER=smtp`, `CLOUDGUARD_SMTP_HOST`, `CLOUDGUARD_SMTP_PORT`, `CLOUDGUARD_SMTP_USERNAME`, and `CLOUDGUARD_SMTP_PASSWORD`; ports 587 and 465 use STARTTLS and implicit TLS respectively. If no provider is specified locally, configured SMTP settings are used when no Brevo key is present. `CLOUDGUARD_EMAIL_API_KEY` must be supplied as an environment variable. OTP codes expire after five minutes, are stored only as keyed digests, and can be resent from the verification screen. Provider requests use HTTPS with a bounded timeout, and provider failures do not expose API keys. Brevo requires the configured sender email to be registered and verified in the account. Do not commit populated environment or Streamlit secret files.
 
 ## Testing
 

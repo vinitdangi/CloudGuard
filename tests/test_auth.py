@@ -195,7 +195,7 @@ def test_resend_delivery_failure_is_logged_without_changing_generic_response(
     user = signup_unverified(
         "delivery_failure", "delivery-failure@example.com", "StrongPass123!", "StrongPass123!"
     )
-    monkeypatch.setenv("CLOUDGUARD_EMAIL_PROVIDER", "resend")
+    monkeypatch.setenv("CLOUDGUARD_EMAIL_PROVIDER", "brevo")
     monkeypatch.setenv("CLOUDGUARD_EMAIL_API_KEY", "never-log-this-api-key")
     monkeypatch.setenv("CLOUDGUARD_EMAIL_FROM", "cloudguard@example.test")
     monkeypatch.setenv("CLOUDGUARD_OTP_SECRET", "test-only-secret-value-32-bytes-long")

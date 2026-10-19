@@ -55,7 +55,7 @@ def test_smtp_verification_uses_tls_and_sends_the_code(monkeypatch):
     assert "smtp-password" not in fake.message.get_content()
 
 
-def test_resend_sends_https_request_with_expected_auth_and_payload(monkeypatch):
+def test_brevo_sends_https_request_with_expected_auth_and_payload(monkeypatch):
     calls = []
 
     class Response:
@@ -72,60 +72,110 @@ def test_resend_sends_https_request_with_expected_auth_and_payload(monkeypatch):
         calls.append((request, timeout))
         return Response()
 
-    monkeypatch.setenv("CLOUDGUARD_EMAIL_PROVIDER", "resend")
-    monkeypatch.setenv("CLOUDGUARD_EMAIL_API_KEY", "re_test_secret")
+    monkeypatch.setenv("CLOUDGUARD_EMAIL_PROVIDER", "brevo")
+    monkeypatch.setenv("CLOUDGUARD_EMAIL_API_KEY", "xkeysib-test-secret")
     monkeypatch.setenv("CLOUDGUARD_EMAIL_FROM", "cloudguard@example.test")
     monkeypatch.setattr(email_delivery, "urlopen", fake_urlopen)
 
     send_verification_email("person@example.test", "001234")
 
     request, timeout = calls[0]
-    assert request.full_url == "https://api.resend.com/emails"
+    assert request.full_url == "https://api.brevo.com/v3/smtp/email"
     assert request.get_method() == "POST"
-    assert request.get_header("Authorization") == "Bearer re_test_secret"
+    assert request.get_header("Api-key") == "xkeysib-test-secret"
     assert request.get_header("Content-type") == "application/json"
     assert timeout == email_delivery.EMAIL_REQUEST_TIMEOUT_SECONDS
     payload = json.loads(request.data)
-    assert payload["from"] == "cloudguard@example.test"
-    assert payload["to"] == ["person@example.test"]
-    assert "001234" in payload["text"]
+    assert payload["sender"] == {"email": "cloudguard@example.test"}
+    assert payload["to"] == [{"email": "person@example.test"}]
+    assert "001234" in payload["textContent"]
 
 
-def test_resend_non_2xx_response_raises_sanitized_error(monkeypatch, caplog):
+def test_brevo_non_2xx_response_raises_sanitized_error(monkeypatch, caplog):
     def fake_urlopen(_request, **_kwargs):
         raise HTTPError(
-            email_delivery.RESEND_EMAIL_API,
+            email_delivery.BREVO_EMAIL_API,
             401,
-            "invalid key re_test_secret",
+            "invalid key xkeysib-test-secret",
             hdrs=None,
             fp=None,
         )
 
-    monkeypatch.setenv("CLOUDGUARD_EMAIL_PROVIDER", "resend")
-    monkeypatch.setenv("CLOUDGUARD_EMAIL_API_KEY", "re_test_secret")
+    monkeypatch.setenv("CLOUDGUARD_EMAIL_PROVIDER", "brevo")
+    monkeypatch.setenv("CLOUDGUARD_EMAIL_API_KEY", "xkeysib-test-secret")
     monkeypatch.setenv("CLOUDGUARD_EMAIL_FROM", "cloudguard@example.test")
     monkeypatch.setattr(email_delivery, "urlopen", fake_urlopen)
 
     with pytest.raises(EmailDeliveryError) as error:
         send_verification_email("person@example.test", "001234")
-    assert "re_test_secret" not in str(error.value)
+    assert "xkeysib-test-secret" not in str(error.value)
     assert "invalid key" not in str(error.value)
-    assert "re_test_secret" not in caplog.text
+    assert "xkeysib-test-secret" not in caplog.text
     assert '"api_key_configured": true' in caplog.text
     assert '"http_status": 401' in caplog.text
     assert '"sender": "cloudguard@example.test"' in caplog.text
 
 
-def test_production_requires_resend_and_api_key(monkeypatch):
+def test_production_requires_brevo_and_api_key(monkeypatch):
     monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
     monkeypatch.setenv("CLOUDGUARD_EMAIL_PROVIDER", "smtp")
     monkeypatch.setenv("CLOUDGUARD_EMAIL_FROM", "cloudguard@example.test")
 
-    with pytest.raises(EmailDeliveryError, match="Production email delivery must use Resend"):
+    with pytest.raises(EmailDeliveryError, match="Production email delivery must use Brevo"):
         send_verification_email("person@example.test", "001234")
 
-    monkeypatch.setenv("CLOUDGUARD_EMAIL_PROVIDER", "resend")
+    monkeypatch.setenv("CLOUDGUARD_EMAIL_PROVIDER", "brevo")
     monkeypatch.delenv("CLOUDGUARD_EMAIL_API_KEY", raising=False)
+    with pytest.raises(EmailDeliveryError, match="Email delivery is not configured"):
+        send_verification_email("person@example.test", "001234")
+
+
+def test_production_brevo_provider_reaches_https_delivery_path(monkeypatch):
+    calls = []
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def getcode(self):
+            return 201
+
+    def fake_urlopen(request, timeout):
+        calls.append((request, timeout))
+        return Response()
+
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
+    monkeypatch.setenv("CLOUDGUARD_EMAIL_PROVIDER", "brevo")
+    monkeypatch.setenv("CLOUDGUARD_EMAIL_API_KEY", "xkeysib-production-test-key")
+    monkeypatch.setenv("CLOUDGUARD_EMAIL_FROM", "cloudguard@example.test")
+    monkeypatch.setattr(email_delivery, "urlopen", fake_urlopen)
+
+    send_verification_email("person@example.test", "001234")
+
+    assert len(calls) == 1
+    request, timeout = calls[0]
+    assert request.full_url == "https://api.brevo.com/v3/smtp/email"
+    assert request.get_method() == "POST"
+    assert request.get_header("Api-key") == "xkeysib-production-test-key"
+    assert timeout == email_delivery.EMAIL_REQUEST_TIMEOUT_SECONDS
+
+
+def test_brevo_api_key_is_read_only_from_environment(monkeypatch):
+    original_setting = email_delivery.setting
+
+    def setting_with_fake_streamlit_key(name, default=""):
+        if name == "CLOUDGUARD_EMAIL_API_KEY":
+            return "streamlit-secret-must-not-be-used"
+        return original_setting(name, default)
+
+    monkeypatch.setenv("CLOUDGUARD_EMAIL_PROVIDER", "brevo")
+    monkeypatch.setenv("CLOUDGUARD_EMAIL_FROM", "cloudguard@example.test")
+    monkeypatch.delenv("CLOUDGUARD_EMAIL_API_KEY", raising=False)
+    monkeypatch.setattr(email_delivery, "setting", setting_with_fake_streamlit_key)
+
     with pytest.raises(EmailDeliveryError, match="Email delivery is not configured"):
         send_verification_email("person@example.test", "001234")
 
