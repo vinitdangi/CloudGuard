@@ -168,6 +168,12 @@ def initialize_database() -> None:
                 expires_at TEXT NOT NULL,
                 attempts INTEGER NOT NULL DEFAULT 0
             )"""
+            reset_table = """CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                token_digest TEXT PRIMARY KEY,
+                user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                expires_at TEXT NOT NULL,
+                used_at TEXT
+            )"""
         else:
             columns = {
                 row["name"] for row in connection.execute("PRAGMA table_info(users)").fetchall()
@@ -182,7 +188,18 @@ def initialize_database() -> None:
                 expires_at TEXT NOT NULL,
                 attempts INTEGER NOT NULL DEFAULT 0
             )"""
+            reset_table = """CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                token_digest TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                expires_at TEXT NOT NULL,
+                used_at TEXT
+            )"""
         connection.execute(verification_table)
+        connection.execute(reset_table)
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS password_reset_tokens_user_idx "
+            "ON password_reset_tokens (user_id)"
+        )
         connection.execute(history_table)
         connection.execute(results_table)
         connection.execute(

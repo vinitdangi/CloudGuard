@@ -48,6 +48,31 @@ class EmailVerificationResponse(BaseModel):
     message: str
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr | None = None
+    identifier: str | None = Field(default=None, min_length=1, max_length=254)
+
+    @model_validator(mode="after")
+    def require_email_or_identifier(self):
+        if (self.email is None) == (self.identifier is None):
+            raise ValueError("Provide exactly one email or username.")
+        return self
+
+
+class PasswordResetRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=256, repr=False)
+    password: str = Field(min_length=1, max_length=1024, repr=False)
+    confirmation: str = Field(min_length=1, max_length=1024, repr=False)
+
+
+class PasswordResetResponse(BaseModel):
+    message: str
+
+
+class GenericMessageResponse(BaseModel):
+    message: str
+
+
 class LoginRequest(BaseModel):
     login: str = Field(min_length=1, max_length=254)
     password: str = Field(min_length=1, max_length=1024, repr=False)

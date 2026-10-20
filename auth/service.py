@@ -138,8 +138,44 @@ def verify_email_otp(
     )
 
 
+def create_password_reset_token(
+    user_id: int, *, now: datetime | None = None
+) -> str:
+    """Create a 256-bit URL-safe token while persisting only its SHA-256 digest."""
+    import hashlib
+    import secrets
+
+    raw_token = secrets.token_urlsafe(32)
+    current = now or datetime.now(timezone.utc)
+    expiry = (current + timedelta(minutes=30)).isoformat()
+    digest = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    AuthRepository.replace_password_reset_token(user_id, digest, expiry)
+    return raw_token
+
+
+def reset_password(
+    token: str, password: str, confirmation: str, *, now: datetime | None = None
+) -> bool:
+    """Validate reset credentials and consume the token exactly once."""
+    import hashlib
+
+    if not password:
+        raise AuthValidationError("Password must not be empty.")
+    if len(password) < 8:
+        raise AuthValidationError("Password must be at least 8 characters long.")
+    if len(password) > 1024:
+        raise AuthValidationError("Password is too long.")
+    if password != confirmation:
+        raise AuthValidationError("Passwords do not match.")
+    current = now or datetime.now(timezone.utc)
+    digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    return AuthRepository.consume_password_reset(
+        digest, current.isoformat(), hash_password(password)
+    )
+
+
 __all__ = [
     "AuthValidationError", "DuplicateUserError", "EmailNotVerifiedError",
     "create_email_otp", "dashboard_login", "login", "signup", "signup_unverified",
-    "verify_email_otp",
+    "create_password_reset_token", "reset_password", "verify_email_otp",
 ]

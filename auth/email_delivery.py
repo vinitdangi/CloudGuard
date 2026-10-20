@@ -36,6 +36,11 @@ def _safe_detail(value: str, api_key: str) -> str:
         detail,
     )
     detail = re.sub(r"\b\d{6}\b", "[REDACTED_OTP]", detail)
+    detail = re.sub(
+        r"(?i)(https?://[^\s\"'<>]*reset-password\?token=)[^\s\"'<>]+",
+        r"\1[REDACTED]",
+        detail,
+    )
     return detail
 
 
@@ -87,7 +92,7 @@ def _provider() -> str:
     return "smtp" if all(setting(name) for name in smtp_settings) else "brevo"
 
 
-def _send_with_brevo(email: str, otp: str, sender: str) -> None:
+def _send_with_brevo(email: str, otp: str, sender: str, *, subject: str = "Verify your CloudGuard email", text_content: str | None = None) -> None:
     # Provider API keys are deployment environment variables, never Streamlit state.
     api_key = os.getenv("CLOUDGUARD_EMAIL_API_KEY", "").strip()
     if not api_key:
@@ -97,8 +102,8 @@ def _send_with_brevo(email: str, otp: str, sender: str) -> None:
         {
             "sender": {"email": sender},
             "to": [{"email": email}],
-            "subject": "Verify your CloudGuard email",
-            "textContent": (
+            "subject": subject,
+            "textContent": text_content or (
                 f"Your CloudGuard email verification code is {otp}. "
                 "It expires in 5 minutes. Do not share this code."
             ),
@@ -154,7 +159,7 @@ def _send_with_brevo(email: str, otp: str, sender: str) -> None:
         raise EmailDeliveryError("Email provider request failed.") from None
 
 
-def _send_with_smtp(email: str, otp: str, sender: str) -> None:
+def _send_with_smtp(email: str, otp: str, sender: str, *, subject: str = "Verify your CloudGuard email", text_content: str | None = None) -> None:
     host = setting("CLOUDGUARD_SMTP_HOST")
     username = setting("CLOUDGUARD_SMTP_USERNAME")
     password = setting("CLOUDGUARD_SMTP_PASSWORD")
@@ -166,11 +171,11 @@ def _send_with_smtp(email: str, otp: str, sender: str) -> None:
         raise EmailDeliveryError("Email delivery is not configured.")
 
     message = EmailMessage()
-    message["Subject"] = "Verify your CloudGuard email"
+    message["Subject"] = subject
     message["From"] = sender
     message["To"] = email
     message.set_content(
-        f"Your CloudGuard email verification code is {otp}. "
+        text_content or f"Your CloudGuard email verification code is {otp}. "
         "It expires in 5 minutes. Do not share this code."
     )
 
@@ -240,3 +245,32 @@ def send_verification_email(email: str, otp: str) -> None:
         api_key_configured=api_key_configured,
         sender=sender,
     )
+
+
+def send_password_reset_email(email: str, reset_url: str) -> None:
+    """Deliver a password reset link using CloudGuard's configured email provider."""
+    sender = setting("CLOUDGUARD_EMAIL_FROM")
+    api_key = os.getenv("CLOUDGUARD_EMAIL_API_KEY", "").strip()
+    provider = _provider()
+    if not sender:
+        raise EmailDeliveryError("Email sender configuration is missing.")
+    body = (
+        "We received a request to reset your CloudGuard password.\n\n"
+        f"Reset your password using this link: {reset_url}\n\n"
+        "This link expires in 30 minutes and can be used once. If you did not "
+        "request a reset, you can ignore this email."
+    )
+    try:
+        if provider == "brevo":
+            _send_with_brevo(
+                email, "", sender, subject="Reset your CloudGuard password", text_content=body
+            )
+        else:
+            _send_with_smtp(
+                email, "", sender, subject="Reset your CloudGuard password", text_content=body
+            )
+    except EmailDeliveryError:
+        raise
+    except Exception:
+        # Provider exceptions may contain the email body or credentials.
+        raise EmailDeliveryError("Password reset email delivery failed.") from None

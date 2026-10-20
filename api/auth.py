@@ -10,16 +10,22 @@ from auth.service import (
     DuplicateUserError,
     EmailNotVerifiedError,
     create_email_otp,
+    create_password_reset_token,
     dashboard_login,
     signup_unverified,
+    reset_password,
     verify_email_otp,
 )
-from auth.email_delivery import send_verification_email, setting
+from auth.email_delivery import send_password_reset_email, send_verification_email, setting
 from database.auth_repository import AuthRepository
 from api.schemas import (
     EmailVerificationRequest,
     EmailVerificationResponse,
+    ForgotPasswordRequest,
+    GenericMessageResponse,
     LoginRequest,
+    PasswordResetRequest,
+    PasswordResetResponse,
     ResendEmailVerificationRequest,
     SignupRequest,
     SignupResponse,
@@ -53,6 +59,51 @@ def _public_user(user) -> UserResponse:
         username=user.username,
         email=user.email,
         created_at=user.created_at,
+    )
+
+
+@router.post("/forgot-password", response_model=GenericMessageResponse)
+def forgot_password(payload: ForgotPasswordRequest) -> GenericMessageResponse:
+    """Issue a reset link when an account matches, with an enumeration-safe response."""
+    identifier = payload.identifier or str(payload.email)
+    user = AuthRepository.find_by_login(identifier)
+    if user is not None and user.email_verified:
+        try:
+            token = create_password_reset_token(user.id)
+            default_frontend = (
+                "http://localhost:3000"
+                if setting("CLOUDGUARD_ENVIRONMENT", "development").lower() != "production"
+                and not setting("RAILWAY_ENVIRONMENT")
+                else "https://cloud-guard-frontend-five.vercel.app"
+            )
+            frontend_origin = setting("CLOUDGUARD_FRONTEND_URL", default_frontend).rstrip("/")
+            send_password_reset_email(
+                user.email, f"{frontend_origin}/reset-password?token={token}"
+            )
+        except Exception:
+            # Keep this route's response identical and never log token, URL, or provider detail.
+            logger.warning("password_reset_email_delivery_failed")
+    return GenericMessageResponse(
+        message="If an account matches, a password reset link has been sent. Check your email.",
+    )
+
+
+@router.post("/reset-password", response_model=PasswordResetResponse)
+def complete_password_reset(payload: PasswordResetRequest) -> PasswordResetResponse:
+    """Consume a valid reset token and replace the account password."""
+    try:
+        consumed = reset_password(payload.token, payload.password, payload.confirmation)
+    except AuthValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    if not consumed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This reset link is invalid, expired, or has already been used.",
+        )
+    return PasswordResetResponse(
+        message="Your password has been reset. Sign in with your new password."
     )
 
 

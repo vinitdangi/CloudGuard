@@ -191,9 +191,12 @@ CLOUDGUARD_OTP_SECRET=<random secret of at least 32 characters>
 CLOUDGUARD_EMAIL_PROVIDER=brevo
 CLOUDGUARD_EMAIL_API_KEY=<Brevo API key>
 CLOUDGUARD_EMAIL_FROM=<verified sender address>
+CLOUDGUARD_FRONTEND_URL=https://cloud-guard-frontend-five.vercel.app
 ```
 
 For local development, SMTP remains available by setting `CLOUDGUARD_EMAIL_PROVIDER=smtp`, `CLOUDGUARD_SMTP_HOST`, `CLOUDGUARD_SMTP_PORT`, `CLOUDGUARD_SMTP_USERNAME`, and `CLOUDGUARD_SMTP_PASSWORD`; ports 587 and 465 use STARTTLS and implicit TLS respectively. If no provider is specified locally, configured SMTP settings are used when no Brevo key is present. `CLOUDGUARD_EMAIL_API_KEY` must be supplied as an environment variable. OTP codes expire after five minutes, are stored only as keyed digests, and can be resent from the verification screen. Provider requests use HTTPS with a bounded timeout, and provider failures do not expose API keys. Brevo requires the configured sender email to be registered and verified in the account. Do not commit populated environment or Streamlit secret files.
+
+Password reset uses the same email provider and sender. `/api/auth/forgot-password` accepts an email or username and always returns a generic response; `/api/auth/reset-password` accepts the token and new password. Reset tokens expire after 30 minutes and the database stores only SHA-256 digests. `initialize_database()` creates the additive `password_reset_tokens` table and index on both PostgreSQL and local SQLite without changing existing users. Set `CLOUDGUARD_FRONTEND_URL` to the public origin that serves `/reset-password` (localhost for local development, the Vercel production origin in Railway).
 
 ## Testing
 

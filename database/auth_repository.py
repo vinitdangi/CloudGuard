@@ -1,6 +1,6 @@
 """Parameterized database operations for CloudGuard accounts."""
 
-from database.db import get_connection, integrity_error_types
+from database.db import _postgresql_requested, get_connection, integrity_error_types
 from database.models import User
 
 
@@ -108,5 +108,37 @@ class AuthRepository:
             connection.execute(
                 "UPDATE users SET email_verified = ? WHERE LOWER(email) = LOWER(?)",
                 (True, email),
+            )
+        return True
+
+    @staticmethod
+    def replace_password_reset_token(user_id: int, digest: str, expires_at: str) -> None:
+        """Replace active reset tokens and persist only the supplied digest."""
+        with get_connection() as connection:
+            # Serialize concurrent requests for the same account on PostgreSQL.
+            if _postgresql_requested():
+                connection.execute("SELECT id FROM users WHERE id = ? FOR UPDATE", (user_id,))
+            connection.execute("DELETE FROM password_reset_tokens WHERE user_id = ?", (user_id,))
+            connection.execute(
+                "INSERT INTO password_reset_tokens (token_digest, user_id, expires_at) "
+                "VALUES (?, ?, ?)",
+                (digest, user_id, expires_at),
+            )
+
+    @staticmethod
+    def consume_password_reset(digest: str, now: str, password_hash: str) -> bool:
+        """Atomically consume a live reset token and replace the password hash."""
+        with get_connection() as connection:
+            token = connection.execute(
+                "UPDATE password_reset_tokens SET used_at = ? "
+                "WHERE token_digest = ? AND used_at IS NULL AND expires_at > ? "
+                "RETURNING user_id",
+                (now, digest, now),
+            ).fetchone()
+            if token is None:
+                return False
+            connection.execute(
+                "UPDATE users SET password_hash = ? WHERE id = ?",
+                (password_hash, token["user_id"]),
             )
         return True
